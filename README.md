@@ -67,9 +67,9 @@ your previous copy is backed up).
 dsh plugin --profile web add oh-my-dsh-slim
 ```
 
-> ⚠️ CLI caveat: run this where `DSH_HOME` is set (e.g. inside the DSH-managed
-> environment). In a bare terminal the CLI falls back to `~/.dsh` and the plugin
-> lands in the wrong home — prefer Option A or the marketplace GUI.
+> ℹ️ This uses the default harness home (`~/.dsh`). If your deployment uses a
+> custom home (e.g. an isolated desktop-app environment), set `DSH_HOME` to it
+> first — the marketplace GUI (Option A) resolves this automatically.
 
 **Option C — git clone:**
 

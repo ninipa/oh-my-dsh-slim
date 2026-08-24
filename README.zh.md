@@ -58,8 +58,8 @@ dsh plugin --profile web add oh-my-dsh-slim
 dsh plugin --profile web add oh-my-dsh-slim
 ```
 
-> ⚠️ CLI 注意：需在 `DSH_HOME` 已设置的环境中运行（如 DSH 托管环境）。裸终端下 CLI 会
-> 回退到 `~/.dsh`，插件会装错位置——普通用户请用方式 A 或 GUI 内的插件市场。
+> ℹ️ 默认部署（home 为 `~/.dsh`）直接执行即可。若你的部署使用了自定义 home
+> （如桌面 App 的隔离环境），请先设置 `DSH_HOME` 再执行——方式 A 的市场 GUI 会自动解析。
 
 **方式 C——git clone：**
 
