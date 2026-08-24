@@ -49,7 +49,7 @@ results. The `subagent_result` tool reads a finished subagent's final message **
 Requires DSH ≥ 0.1.1-rc.2 and a DeepSeek API key (default models route through
 deepseek-official).
 
-**Option A — plugin marketplace (one command):**
+**Option A — plugin marketplace (recommended):**
 
 ```bash
 dsh plugin --profile web add oh-my-dsh-slim
@@ -61,7 +61,17 @@ The package ships a seeder that materializes the preset into
 `$DSH_HOME/.agent-presets/oh-my-dsh-slim` automatically (updates come with plugin upgrades;
 your previous copy is backed up).
 
-**Option B — git clone:**
+**Option B — CLI:**
+
+```bash
+dsh plugin --profile web add oh-my-dsh-slim
+```
+
+> ⚠️ CLI caveat: run this where `DSH_HOME` is set (e.g. inside the DSH-managed
+> environment). In a bare terminal the CLI falls back to `~/.dsh` and the plugin
+> lands in the wrong home — prefer Option A or the marketplace GUI.
+
+**Option C — git clone:**
 
 ```bash
 git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-my-dsh-slim"

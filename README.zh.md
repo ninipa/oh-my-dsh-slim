@@ -41,7 +41,7 @@ DSH 的默认编排是“一个模型包打天下”。本预设把工作拆成�
 
 需要 DSH ≥ 0.1.1-rc.2 与 DeepSeek API key（默认模型走 deepseek-official）。
 
-**方式 A——插件市场（一条命令）：**
+**方式 A——插件市场（推荐）：**
 
 ```bash
 dsh plugin --profile web add oh-my-dsh-slim
@@ -52,7 +52,16 @@ dsh plugin --profile web add oh-my-dsh-slim
 包内自带播种器，会自动把预设物化到
 `$DSH_HOME/.agent-presets/oh-my-dsh-slim`（升级随插件版本走，旧目录自动备份）。
 
-**方式 B——git clone：**
+**方式 B——CLI 命令：**
+
+```bash
+dsh plugin --profile web add oh-my-dsh-slim
+```
+
+> ⚠️ CLI 注意：需在 `DSH_HOME` 已设置的环境中运行（如 DSH 托管环境）。裸终端下 CLI 会
+> 回退到 `~/.dsh`，插件会装错位置——普通用户请用方式 A 或 GUI 内的插件市场。
+
+**方式 C——git clone：**
 
 ```bash
 git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-my-dsh-slim"
