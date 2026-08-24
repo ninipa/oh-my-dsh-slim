@@ -153,6 +153,31 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
   host search service, which issues an independent auxiliary model request per query. For open-ended
   research, give the task a search budget in the prompt
 
+## FAQ
+
+**Which API key do I need?**
+A DeepSeek API key — the default role models route through deepseek-official.
+Roles can be pointed at any provider you imported in **Settings → Models**.
+
+**Can I use other models per role?**
+Yes — every role's model and reasoning effort is configurable via the user JSON
+(or conversational config). Unknown model ids are rejected at delegation time
+with the full list of imported models.
+
+**How do I uninstall?**
+Remove `$DSH_HOME/.agent-presets/oh-my-dsh-slim` (or disable the preset in
+**Settings → Agent Presets**). If you installed the marketplace seeder plugin,
+uninstalling the plugin does not remove the preset directory.
+
+**Image analysis?**
+Use a vision-capable main model (e.g. deepseek-v4-flash-vision-exp) and paste
+directly. The observer role is reserved until the harness can forward
+attachments into subagent contexts.
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md).
+
 ## Acknowledgments
 
 - [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) (MIT © 2025
