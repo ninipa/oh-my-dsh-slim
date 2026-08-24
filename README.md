@@ -49,6 +49,20 @@ results. The `subagent_result` tool reads a finished subagent's final message **
 Requires DSH ≥ 0.1.1-rc.2 and a DeepSeek API key (default models route through
 deepseek-official).
 
+**Option A — plugin marketplace (one command):**
+
+```bash
+dsh plugin --profile web add oh-my-dsh-slim
+```
+
+Also listed in the DSH plugin marketplace GUI and the
+[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) catalog.
+The package ships a seeder that materializes the preset into
+`$DSH_HOME/.agent-presets/oh-my-dsh-slim` automatically (updates come with plugin upgrades;
+your previous copy is backed up).
+
+**Option B — git clone:**
+
 ```bash
 git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-my-dsh-slim"
 ```
@@ -91,10 +105,9 @@ kimi-k3" or "disable the oracle role" — the orchestrator edits the JSON per th
 
 ## Roadmap
 
-- **Plugin-marketplace install** — this preset will soon be installable directly from the DSH
-  plugin marketplace with one click (no manual directory copy; bundled preset seeder)
 - **GUI configuration** — role toggles, per-role model selection (from your imported providers),
-  and reasoning effort will become editable directly in the DSH GUI settings, replacing JSON edits
+  and reasoning effort will become editable directly in the DSH GUI settings (host-native plugin
+  config forms), replacing JSON edits
 
 ## Self-tests & probes (all zero-cost)
 

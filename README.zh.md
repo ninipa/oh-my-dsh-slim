@@ -41,6 +41,19 @@ DSH 的默认编排是“一个模型包打天下”。本预设把工作拆成�
 
 需要 DSH ≥ 0.1.1-rc.2 与 DeepSeek API key（默认模型走 deepseek-official）。
 
+**方式 A——插件市场（一条命令）：**
+
+```bash
+dsh plugin --profile web add oh-my-dsh-slim
+```
+
+也可在 DSH 插件市场 GUI 与
+[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 目录中找到。
+包内自带播种器，会自动把预设物化到
+`$DSH_HOME/.agent-presets/oh-my-dsh-slim`（升级随插件版本走，旧目录自动备份）。
+
+**方式 B——git clone：**
+
 ```bash
 git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-my-dsh-slim"
 ```
@@ -79,9 +92,8 @@ git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-
 
 ## 即将发布（Roadmap）
 
-- **插件市场一键安装**——本预设即将支持从 DSH 插件市场直接安装（含预设播种器，无需手动复制目录）
 - **GUI 配置界面**——角色开关、按角色选择模型（从你导入的 provider 中选）与思考强度，
-  将可直接在 DSH GUI 设置中完成，不再需要编辑 JSON
+  将直接在 DSH GUI 设置中完成（宿主原生插件配置表单），不再需要编辑 JSON
 
 ## 自检与测试（全部零费用）
 
