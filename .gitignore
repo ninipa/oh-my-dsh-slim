@@ -1,0 +1,4 @@
+# build/test artifacts
+node_modules/
+*.bak-*
+.DS_Store
