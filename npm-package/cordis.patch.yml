@@ -1,0 +1,9 @@
+# oh-my-dsh-slim bundle patch
+#
+# Declared via the package's `dsh.bundle.patch` manifest: when installed with
+#   dsh plugin --profile <name> add oh-my-dsh-slim
+# (or one-click from the plugin marketplace), the loader appends this row and
+# the seeder mounts with the rest of the tree.
+- insert:
+    - id: omds-preset-seeder
+      name: 'oh-my-dsh-slim'

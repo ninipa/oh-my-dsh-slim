@@ -1,0 +1,34 @@
+{
+  "name": "oh-my-dsh-slim",
+  "version": "0.1.1",
+  "description": "oh-my-opencode-slim-style specialist subagent delegation preset for DeepSeek Harness — ships the preset and seeds it into your DSH home automatically.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ninipa/oh-my-dsh-slim.git"
+  },
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "agent-preset",
+    "subagent",
+    "oh-my-opencode-slim"
+  ],
+  "files": [
+    "lib",
+    "preset",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
