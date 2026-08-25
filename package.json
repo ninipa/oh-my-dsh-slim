@@ -1,0 +1,20 @@
+{
+  "name": "oh-my-dsh-slim",
+  "version": "0.1.2",
+  "description": "oh-my-opencode-slim-style specialist subagent delegation preset for DeepSeek Harness — orchestrator + 5 specialist roles, background-first delegation, JSON-driven configuration.",
+  "license": "MIT",
+  "type": "module",
+  "main": "npm-package/lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ninipa/oh-my-dsh-slim.git"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

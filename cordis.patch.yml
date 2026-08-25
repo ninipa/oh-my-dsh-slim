@@ -1,0 +1,11 @@
+# oh-my-dsh-slim bundle patch (repository manifest)
+#
+# Declared so `dsh plugin --profile web add github:ninipa/oh-my-dsh-slim`
+# installs the preset seeder, which materializes the full preset into
+# $DSH_HOME/.agent-presets/oh-my-dsh-slim. The shipped npm package
+# (oh-my-dsh-slim on npmjs, built from npm-package/) carries the same
+# declaration; this root-level manifest keeps the GitHub-side entry valid
+# for `dsh plugin add` and the marketplace submission gate.
+- insert:
+    - id: omds-preset-seeder
+      name: 'oh-my-dsh-slim'
