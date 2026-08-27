@@ -86,8 +86,20 @@ Done — the preset appears immediately. Create a new session and pick **极简�
 
 ## Configuration
 
-Zero configuration required (sensible defaults ship with the preset). To customize, create
-`$DSH_HOME/oh-my-dsh-slim.json` (schema: [oh-my-dsh-slim.schema.json](./oh-my-dsh-slim.schema.json)):
+Zero configuration required (sensible defaults ship with the preset). User intent is read in
+descending priority:
+
+1. The file pointed to by the `OH_MY_DSH_SLIM_CONFIG` env var (test/CI channel)
+2. **The host settings namespace `oh-my-dsh-slim`** (recommended): the bundled seeder registers
+   this namespace, so configuration lives under the `oh-my-dsh-slim:` section of the host's
+   `settings.yaml`. Effort/temperature are re-read on every delegation (edits apply immediately);
+   model/maxTokens apply to new sessions
+3. The legacy `$DSH_HOME/oh-my-dsh-slim.json` file (fallback for hosts without a settings
+   service). On hosts with the npm package installed, the file is imported into the settings
+   namespace on first boot and archived as `oh-my-dsh-slim.json.imported-<timestamp>`
+
+All three channels share one document shape (schema:
+[oh-my-dsh-slim.schema.json](./oh-my-dsh-slim.schema.json)):
 
 ```json
 {
@@ -110,14 +122,23 @@ Zero configuration required (sensible defaults ship with the preset). To customi
 - **observer is locked**: `observer.enabled: true` is ignored with a warning (see above)
 - Changes take effect in **new sessions**; running sessions are unaffected
 
+**GUI card** (ships with the npm package): after install, a card appears under
+**Settings → Plugins → Plugin configuration** — per-role toggle/model/effort editable inline,
+advanced maxTokens/temperature behind a warning sub-section, and a model dropdown sourced from
+the same catalog as the composer's picker. The orchestrator row is informational only: it is the
+session's main model, changed in the composer's picker (defaults under Settings → Models). Saving
+reports which changes apply immediately (effort/temperature) and which start with new sessions.
+
 **Conversational configuration** (no JSON editing needed): just say e.g. "change fixer's model to
 kimi-k3" or "disable the oracle role" — the orchestrator edits the JSON per the schema.
 
 ## Roadmap
 
-- **GUI configuration** — role toggles, per-role model selection (from your imported providers),
-  and reasoning effort will become editable directly in the DSH GUI settings (host-native plugin
-  config forms), replacing JSON edits
+- ~~**GUI configuration**~~ — **Done**: role toggles, per-role model selection (from your imported
+  providers, same catalog as the composer picker) and reasoning effort are editable in
+  **Settings → Plugins → Plugin configuration** — install the npm package and the card appears
+  (host-native plugin config surface). The orchestrator is informational only: it is the session's
+  main model, changed in the composer's picker (defaults under Settings → Models).
 
 ## Self-tests & probes (all zero-cost)
 

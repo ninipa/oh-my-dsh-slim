@@ -4,6 +4,39 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.2.0] — 2026-08-26
+
+### Added
+
+- Host settings namespace `oh-my-dsh-slim` as the primary configuration channel
+  (hot-updated; a legacy `oh-my-dsh-slim.json` is imported once into the
+  namespace and archived automatically). Channel priority: `OH_MY_DSH_SLIM_CONFIG`
+  test file > settings namespace > legacy JSON fallback.
+- GUI configuration card under **Settings → Plugins → Plugin configuration**
+  (ships with the npm package): per-role enable toggles, per-role model
+  selection from the same catalog as the composer's model picker, reasoning
+  effort, advanced maxTokens/temperature behind a warning sub-section, and
+  reset-to-defaults (user layer only — hand-edited keys such as `mcpServers`
+  are preserved).
+- `settings-schema.js`: the schemastery schema is generated from defaults.json
+  at runtime (role ids / effort levels / tool names keep one source of truth).
+
+### Changed
+
+- Effort and temperature apply to the current session immediately; model,
+  token budget and role toggles apply to new sessions (running sessions stay
+  locked at creation-time composition, unchanged).
+- The seeder registers the namespace with the shipped defaults as the BASE
+  layer: fields written back equal to the default are unset (inherit), so the
+  user section only ever carries genuine overrides.
+
+### Fixed
+
+- Preset plugin mounts fail loud on hosts where an undeclared service is
+  accessed (`inject: ['settings']` declared on role plugins).
+- The npm packaging no longer embeds the repository's own `npm-package/`
+  subfolder inside `preset/`.
+
 ## [0.1.1] — 2026-08-24
 
 ### Added

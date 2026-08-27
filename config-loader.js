@@ -1,8 +1,11 @@
 // Configuration loader for the shareable oh-my-dsh-slim preset.
 //
-// The preset remains usable without a user file: defaults.json is bundled next
-// to this module. A user override is read from OH_MY_DSH_SLIM_CONFIG or
-// $DSH_HOME/oh-my-dsh-slim.json and merged by stable role id.
+// The preset remains usable without any user configuration: defaults.json is
+// bundled next to this module. User intent is read from, in descending
+// priority: the OH_MY_DSH_SLIM_CONFIG test channel, the host settings
+// namespace "oh-my-dsh-slim" (registered by the npm seeder; hot-updated), or
+// the legacy $DSH_HOME/oh-my-dsh-slim.json file for hosts without a settings
+// service. All sources share one shape and one merge.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -10,7 +13,13 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_NAME = 'oh-my-dsh-slim.json';
+// The settings namespace registered (and imported from the legacy file) by the
+// npm seeder. Defined here so both the loader and the schema share one string
+// without an import cycle (settings-schema.js imports the constants below).
+export const SETTINGS_NS = 'oh-my-dsh-slim';
 const ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
+// Reasoning-effort vocabulary accepted for every role and the orchestrator.
+export const EFFORT_LEVELS = ['off', 'low', 'medium', 'high', 'max'];
 const RUNTIME_DEFAULTS = {
   oracle: { temperature: 0.1, maxTokens: 128000 },
   designer: { temperature: 0.7, maxTokens: 64000 },
@@ -33,7 +42,7 @@ const TOOL_NAMES = new Set([
 // per-user setting.
 const FORCE_DISABLED_ROLES = new Set(['observer']);
 
-let cached;
+let cachedDefaults;
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -105,7 +114,7 @@ function validateRole(roleId, role, servers) {
   if (role.enabled !== undefined && typeof role.enabled !== 'boolean') throw new Error(`oh-my-dsh-slim: ${roleId}.enabled must be a boolean`);
   if (role.provider !== undefined && typeof role.provider !== 'string') throw new Error(`oh-my-dsh-slim: ${roleId}.provider must be a string`);
   if (role.model !== undefined && typeof role.model !== 'string') throw new Error(`oh-my-dsh-slim: ${roleId}.model must be a string`);
-  if (role.effort !== undefined && !['off', 'low', 'medium', 'high', 'max'].includes(role.effort)) throw new Error(`oh-my-dsh-slim: ${roleId}.effort is invalid`);
+  if (role.effort !== undefined && !EFFORT_LEVELS.includes(role.effort)) throw new Error(`oh-my-dsh-slim: ${roleId}.effort is invalid`);
   if (role.temperature !== undefined && (typeof role.temperature !== 'number' || role.temperature < 0 || role.temperature > 2)) {
     throw new Error(`oh-my-dsh-slim: ${roleId}.temperature must be between 0 and 2`);
   }
@@ -124,10 +133,39 @@ function validateRole(roleId, role, servers) {
   }
 }
 
-function load() {
-  const defaults = readJson(join(ROOT, 'defaults.json'));
-  const path = userConfigPath();
-  const user = path && existsSync(path) ? readJson(path) : {};
+function readSettingsSection(ctx) {
+  // The settings service is host-global on any DSH whose base bundle mounts
+  // dsh-settings (rc.7+). Where it is absent — mock contexts, exotic
+  // compositions — the cordis accessor is undefined and the legacy JSON
+  // channel below stays authoritative. get() returns undefined while our
+  // namespace is unregistered, which is the same signal.
+  const settings = ctx?.settings;
+  return typeof settings?.get === 'function' ? settings.get(SETTINGS_NS) : undefined;
+}
+
+function load(ctx) {
+  const defaults = readDefaults();
+  const envPath = process.env.OH_MY_DSH_SLIM_CONFIG;
+  let user;
+  let source;
+  if (envPath !== undefined) {
+    // Explicit test/CI channel: always a file, always wins.
+    user = existsSync(envPath) ? readJson(envPath) : {};
+    source = envPath;
+  } else {
+    const section = readSettingsSection(ctx);
+    if (section !== undefined) {
+      // Resolved settings section: schema-validated at registration/write
+      // time and deep-frozen by the host; every call re-reads the latest
+      // snapshot, so GUI edits apply without a restart.
+      user = section;
+      source = `settings:${SETTINGS_NS}`;
+    } else {
+      const path = userConfigPath();
+      user = path && existsSync(path) ? readJson(path) : {};
+      source = path ?? 'bundled defaults.json';
+    }
+  }
   const presetName = user.preset ?? defaults.preset;
   if (user.preset !== undefined && defaults.presets?.[presetName] === undefined && user.presets?.[presetName] === undefined) {
     throw new Error(`oh-my-dsh-slim: unknown preset "${presetName}"`);
@@ -143,7 +181,7 @@ function load() {
     validateRole(roleId, roles[roleId], servers);
   }
   return freeze({
-    source: path ?? 'bundled defaults.json',
+    source,
     preset: presetName,
     servers: clone(servers),
     roles,
@@ -151,13 +189,20 @@ function load() {
   });
 }
 
-export function loadConfig() {
-  cached ??= load();
-  return cached;
+function readDefaults() {
+  cachedDefaults ??= readJson(join(ROOT, 'defaults.json'));
+  return cachedDefaults;
+}
+
+// No user-layer caching: the settings path re-reads the host's latest resolved
+// snapshot per call (cheap, in-memory) and the legacy file paths re-stat a
+// tiny document, so configuration edits apply without a process restart.
+export function loadConfig(ctx) {
+  return load(ctx);
 }
 
 export function resetConfigForTests() {
-  cached = undefined;
+  cachedDefaults = undefined;
 }
 
 export { ROLE_IDS, RUNTIME_DEFAULTS, TOOL_NAMES };

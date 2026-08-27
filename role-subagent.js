@@ -51,7 +51,11 @@ const { assertSubagentMaxDepth, settleRun } = require('@deepseek-ai/dsh-subagent
 const mcpClient = require('@deepseek-ai/dsh-mcp-client');
 
 const name = 'role-subagent';
-const inject = ['tools', 'subagents', 'systemPrompt'];
+// settings: role configuration is read from the host settings namespace
+// (registered by the npm seeder); declared here because cordis blocks
+// undeclared service access. On hosts without the service the accessor is
+// undefined and config-loader falls back to the legacy JSON file.
+const inject = ['tools', 'subagents', 'systemPrompt', 'settings'];
 
 /**
  * Names the calling agent may legally put in a toolFilter, i.e. exactly what
@@ -259,7 +263,7 @@ function installScopedMcp(childCtx, roleId, roleConfig, servers) {
 
 function apply(ctx, config) {
   if (config.maxDepth !== 'provider-managed') assertSubagentMaxDepth(config.maxDepth);
-  const loaded = loadConfig();
+  const loaded = loadConfig(ctx);
   const roleConfig = loaded.roles[config.roleId];
   if (roleConfig === undefined) throw new Error(`role-subagent: unknown roleId "${config.roleId}"`);
   const providerName = config.provider;

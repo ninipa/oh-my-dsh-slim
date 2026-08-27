@@ -74,8 +74,18 @@ git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-
 
 ## 配置
 
-零配置即可使用（内置默认值随预设分发）。定制时创建 `$DSH_HOME/oh-my-dsh-slim.json`
-（schema 见 [oh-my-dsh-slim.schema.json](./oh-my-dsh-slim.schema.json)）：
+零配置即可使用（内置默认值随预设分发）。用户配置按以下优先级读取：
+
+1. `OH_MY_DSH_SLIM_CONFIG` 环境变量指向的文件（测试/CI 通道）
+2. **宿主设置命名空间 `oh-my-dsh-slim`**（推荐）：随 npm 包安装的播种器会注册该命名空间，
+   配置写在宿主 `settings.yaml` 的 `oh-my-dsh-slim:` 段；effort/temperature 每次委派实时读取
+   （改动即时生效），模型/maxTokens 对新会话生效
+3. 旧版 `$DSH_HOME/oh-my-dsh-slim.json` 文件（无 settings 服务的宿主的回退通道）。安装了
+   npm 包的宿主首次启动时会把它自动导入 settings 命名空间并归档为
+   `oh-my-dsh-slim.json.imported-<时间戳>`
+
+三种通道共用同一份文档结构（schema 见
+[oh-my-dsh-slim.schema.json](./oh-my-dsh-slim.schema.json)）：
 
 ```json
 {
@@ -96,13 +106,20 @@ git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-
 - **observer 锁定**：`observer.enabled: true` 会被忽略并警告（原因见上）
 - 修改后**新会话生效**，运行中会话不受影响
 
+**GUI 配置卡片**（随 npm 包分发）：安装后「设置 → 插件 → 插件配置」出现卡片——每个角色的
+启用/模型/思考档可直接编辑，高级子区含 token 上限与温度（带默认值告警），模型下拉与对话输入框
+选择器同源。orchestrator 仅展示说明：它是当前会话主模型，在对话输入框的选择器中更换（默认模型在
+设置-模型 维护）。保存后会提示生效语义（思考档/温度立即生效；模型/token/启停新会话生效）。
+
 **对话式配置**（无需手编 JSON）：在会话里直接说，例如"帮我把 fixer 的模型换成 kimi-k3"或
 "关闭 oracle 角色"——主模型会按 schema 修改上述 JSON。
 
 ## 即将发布（Roadmap）
 
-- **GUI 配置界面**——角色开关、按角色选择模型（从你导入的 provider 中选）与思考强度，
-  将直接在 DSH GUI 设置中完成（宿主原生插件配置表单），不再需要编辑 JSON
+- ~~**GUI 配置界面**~~ —— **已完成**：角色开关、按角色选择模型（从你导入的 provider 中选，
+  与对话输入框选择器同源）与思考强度，直接在 **设置 → 插件 → 插件配置** 编辑——安装 npm 包后
+  卡片即出现（宿主原生插件配置面板）。orchestrator 仅展示说明：它是当前会话主模型，在对话
+  输入框的选择器中更换（默认模型在 设置-模型 维护）。
 
 ## 自检与测试（全部零费用）
 

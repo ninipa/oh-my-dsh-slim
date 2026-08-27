@@ -26,6 +26,12 @@ function isSubagent(payload) {
   return (payload.agent?.session?.header?.delegationDepth ?? 0) > 0;
 }
 
+// settings: per-request role configuration comes from the host settings
+// namespace (registered by the npm seeder); cordis blocks undeclared service
+// access. On hosts without the service the accessor is undefined and
+// config-loader falls back to the legacy JSON file.
+const inject = ['settings'];
+
 export function apply(ctx) {
   ctx.on('agent/request', async (payload, next) => {
     const resolved = await next();
@@ -36,7 +42,7 @@ export function apply(ctx) {
         : resolved;
     }
     const roleId = roleFromPayload(payload);
-    const role = roleId ? loadConfig().roles[roleId] : undefined;
+    const role = roleId ? loadConfig(ctx).roles[roleId] : undefined;
     if (role === undefined) {
       return resolved.reasoningEffort === 'high' && resolved.temperature !== undefined
         ? resolved
@@ -51,3 +57,4 @@ export function apply(ctx) {
 }
 
 export const name = 'effort-by-role';
+export { inject };
