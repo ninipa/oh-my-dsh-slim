@@ -31,9 +31,14 @@ window.__ModuleLoader__.load({
 
     // ---------------------------------------------------------------- locale
     const zh = {
-      desc: '专家角色委派预设：orchestrator + 5 个专职角色。',
-      presetLabel: '预设',
+      desc: '专家角色Subagent委派预设和设置。',
       orchestratorNote: 'orchestrator 即当前会话主模型：在对话输入框的模型选择器中更换，默认模型在 设置-模型 维护。',
+      webFetch: 'web_fetch 工具',
+      webFetchBenefit: '开启后模型可直接抓取目标网页原文，减少反复搜索拼凑片段。',
+      webFetchRestart: '变更需重启 DSH 生效。',
+      webFetchRisk: 'SSRF 风险：provider 无内网防护，勿在可触达敏感内网的部署开启。',
+      webFetchProviderMissing: '未检测到 provider：需安装 web-fetch-http（README「进阶配置」）后重启。',
+      webFetchProviderUnknown: '无法检测 provider 状态，开启前请确认已安装 provider。',
       enabled: '启用',
       model: '模型',
       effort: '思考档',
@@ -65,9 +70,14 @@ window.__ModuleLoader__.load({
       roleObserver: '视觉分析（本版锁定）',
     };
     const en = {
-      desc: 'Specialist delegation preset: orchestrator + 5 roles.',
-      presetLabel: 'Preset',
+      desc: 'Expert-role subagent delegation preset and settings.',
       orchestratorNote: 'The orchestrator is the session\u2019s main model: change it in the composer\u2019s model picker; defaults live in Settings \u2192 Models.',
+      webFetch: 'web_fetch tool',
+      webFetchBenefit: 'When enabled, the model can fetch the target page text directly instead of repeatedly searching and stitching snippets.',
+      webFetchRestart: 'Takes effect after restarting DSH.',
+      webFetchRisk: 'SSRF risk: the provider has no private-network protection; do not enable in deployments that can reach sensitive internal targets.',
+      webFetchProviderMissing: 'No provider detected: install web-fetch-http (README \u201cAdvanced configuration\u201d) and restart.',
+      webFetchProviderUnknown: 'Provider status unavailable; confirm a provider is installed before enabling.',
       enabled: 'Enabled',
       model: 'Model',
       effort: 'Effort',
@@ -136,7 +146,7 @@ window.__ModuleLoader__.load({
           temperature: adv.temperature,
         };
       }
-      return { preset: presetName, roles };
+      return { preset: presetName, webFetch: value?.webFetch === true, roles };
     }
 
     /**
@@ -149,6 +159,17 @@ window.__ModuleLoader__.load({
     function planUserOps(base, user, draft) {
       const ops = [];
       const presetName = draft.preset;
+      // webFetch: top-level namespace field, no bundled base — an explicit
+      // `true` is stored; `false` (the default) is unset (inherit).
+      {
+        const path = ['webFetch'];
+        const uv = getPath(user, path);
+        if (draft.webFetch === true) {
+          if (uv !== true) ops.push({ op: 'set', path, value: true });
+        } else if (uv !== undefined) {
+          ops.push({ op: 'unset', path });
+        }
+      }
       for (const roleId of ROLE_IDS) {
         const d = draft.roles?.[roleId] ?? {};
         for (const field of PRESET_FIELDS) {
@@ -378,21 +399,48 @@ window.__ModuleLoader__.load({
       // host-provided disclosure wrapper, so the card draws its own.
       const [cardOpen, setCardOpen] = React.useState(false);
 
+      // Fetch-provider availability from the seeder's /omds RPC (loopback).
+      // 'ready' | 'missing' | 'unknown' — unknown keeps the toggle enabled
+      // with a hint (no RPC channel, e.g. headless or older hosts).
+      const [provider, setProvider] = React.useState({ status: 'unknown', ids: [] });
+      React.useEffect(() => {
+        let alive = true;
+        connection.rpc?.call?.('/omds', 'provider-status', {}).then((response) => {
+          if (!alive) return;
+          const value = response?.ok === true ? response.value : undefined;
+          setProvider(value !== undefined
+            ? { status: value.installed === true ? 'ready' : 'missing', ids: value.providerIds ?? [] }
+            : { status: 'unknown', ids: [] });
+        }).catch(() => { if (alive) setProvider({ status: 'unknown', ids: [] }); });
+        return () => { alive = false; };
+      }, [connection]);
+
+      const changeWebFetch = (enabled) => {
+        setDraft((previous) => {
+          const next = previous ?? buildDraft(effective);
+          return { ...next, webFetch: enabled };
+        });
+      };
+
       const headerButton = React.createElement('button', {
         type: 'button',
         onClick: () => setCardOpen((o) => !o),
         'aria-expanded': cardOpen,
+        // Match the host built-in cards' header chrome (dsh-client-ui-settings-plugins):
+        // one flex row — text block (title + description stacked, flex:1) then chevron.
         style: {
-          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-          background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: color.text,
+          appearance: 'none', width: '100%', textAlign: 'left', cursor: 'pointer',
+          background: 'none', border: 'none', color: color.text,
+          display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 12,
         },
       },
-        React.createElement('span', { style: { fontSize: 14, fontWeight: 600 } }, 'oh-my-dsh-slim'),
-        React.createElement('span', { style: { fontSize: 12, color: color.tertiary } }, `${t('presetLabel')}: ${current.preset}`),
-        React.createElement('span', {
-          style: { fontSize: 12, color: color.secondary, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
-        }, t('desc')),
-        !cardOpen && dirty ? React.createElement(ui.IconWarningOutline16, { size: 14 }) : null,
+        React.createElement('span', { style: { display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 } },
+          React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } },
+            React.createElement('span', { style: { fontSize: 15, fontWeight: 600, lineHeight: '1.4', color: color.text } }, 'oh-my-dsh-slim'),
+            !cardOpen && dirty ? React.createElement(ui.IconWarningOutline16, { size: 14 }) : null,
+          ),
+          React.createElement('span', { style: { fontSize: 13, lineHeight: '1.5', color: color.tertiary } }, t('desc')),
+        ),
         React.createElement(ui.IconChevronDownOutline14, {
           size: 14,
           style: { transform: cardOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s', color: color.tertiary, flex: 'none' },
@@ -405,8 +453,12 @@ window.__ModuleLoader__.load({
         onAdvancedToggle: () => toggleAdvanced(roleId), onChange: changeRole, t,
       }));
 
-      const footer = React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' } },
-        dirty ? React.createElement('span', { style: { fontSize: 12, color: color.warn } }, t('dirty')) : null,
+      // The action row lives at the TOP of the expanded card (next to the
+      // webFetch toggle and role rows) so both save and reset are always
+      // reachable without scrolling; dirty only switches the "unsaved" note
+      // and the save button's availability.
+      const actions = React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' } },
+        dirty ? React.createElement('span', { style: { fontSize: 12, color: color.warn, marginRight: 'auto' } }, t('dirty')) : null,
         confirmReset
           ? React.createElement(React.Fragment, null,
             React.createElement('span', { style: { fontSize: 12, color: color.warn } }, t('resetConfirm')),
@@ -422,20 +474,41 @@ window.__ModuleLoader__.load({
       // Collapsed cards render only the header row; every editable surface
       // (roles, actions, hints, toast mount point) lives behind cardOpen.
       const body = cardOpen ? React.createElement(React.Fragment, null,
+        React.createElement('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l2)', padding: '14px 16px 16px', display: 'flex', flexDirection: 'column', gap: 10, color: color.text } },
+        actions,
         React.createElement('div', { style: { display: 'flex', gap: 6, fontSize: 12, color: color.secondary, background: color.hover, borderRadius: 8, padding: '6px 8px' } },
           t('orchestratorNote')),
+        React.createElement('div', { style: { border: `1px solid ${color.border}`, borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 } },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 } },
+            React.createElement(Switch, {
+              checked: current.webFetch === true,
+              disabled: provider.status === 'missing',
+              onChange: () => changeWebFetch(!(current.webFetch === true)), label: t('webFetch'),
+            }),
+            React.createElement('span', { style: { fontSize: 13, fontWeight: 600, color: color.text, flex: 'none' } }, t('webFetch')),
+          ),
+          React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('webFetchBenefit')),
+          provider.status === 'missing'
+            ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12, background: color.warnBg, borderRadius: 8, padding: '6px 8px' } },
+              React.createElement(ui.IconWarningOutline16, { size: 14 }), t('webFetchProviderMissing'))
+            : provider.status === 'unknown'
+              ? React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('webFetchProviderUnknown'))
+              : React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('webFetchRestart')),
+          React.createElement('span', { style: { fontSize: 11, color: 'var(--dsw-alias-state-error-primary)', lineHeight: '16px' } }, t('webFetchRisk')),
+        ),
         roleRows,
         !writable ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12 } },
           React.createElement(ui.IconWarningOutline16, { size: 14 }), t('readOnly')) : null,
-        footer,
         React.createElement('span', { style: { fontSize: 11, color: color.tertiary } }, t('effectiveHint')),
         toast ? React.createElement(ui.Toast, { text: toast.text, icon: toast.icon, onDone: () => setToast(null) }) : null,
+        ),
       ) : null;
 
       return React.createElement('div', {
         style: {
-          border: `1px solid ${color.border}`, borderRadius: 12, padding: 16,
-          display: 'flex', flexDirection: 'column', gap: 10, color: color.text, minWidth: 0,
+          border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 12,
+          background: 'var(--dsw-alias-bg-layer-3)',
+          display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden',
         },
       }, headerButton, body);
     }

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "preset": { "type": "string" },
+    "mcpServers": { "type": "object", "additionalProperties": { "$ref": "#/$defs/mcpServer" } },
+    "presets": { "type": "object", "additionalProperties": { "$ref": "#/$defs/preset" } },
+    "advanced": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "roles": { "type": "object", "additionalProperties": { "$ref": "#/$defs/roleOverride" } } }
+    }
+  },
+  "$defs": {
+    "mcpServer": {
+      "type": "object",
+      "required": ["transport"],
+      "properties": {
+        "transport": { "enum": ["stdio", "streamable-http"] },
+        "url": { "type": "string" },
+        "command": { "type": "string" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "roleOverride": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "description": "Mount this role's tool (default true). observer is force-disabled in this preset version and ignores enabled:true." },
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "effort": { "enum": ["off", "low", "medium", "high", "max"] },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "deny": { "type": "array", "items": { "type": "string" } },
+        "mcps": { "type": "array", "items": { "type": "string" } },
+        "personaAppend": { "type": "string" },
+        "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+        "maxTokens": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "preset": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/roleOverride" }
+    }
+  }
+}

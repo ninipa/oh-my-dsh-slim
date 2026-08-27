@@ -137,6 +137,30 @@ async function wireSettings(ctx, log) {
   });
 }
 
+// Register a read-only RPC channel the settings card queries for fetch
+// provider availability: the web_fetch toggle needs to know whether the host
+// actually has a provider (e.g. @deepseek-ai/dsh-web-fetch-http) before it
+// can be enabled. Loopback-only: the GUI talks to 127.0.0.1. Absent on hosts
+// without the connection service — the card then keeps the toggle available
+// but shows its own fallback hint.
+function wireProviderStatusRpc(ctx, log) {
+  ctx.inject(['connection', 'web'], (cctx) => {
+    try {
+      const dispose = cctx.connection.rpc.handle('/omds', async (endpoint, _payload, _signal) => {
+        if (endpoint !== 'provider-status') {
+          return { ok: false, error: { code: 'NOT_FOUND', message: `unknown endpoint ${endpoint}` } };
+        }
+        const providers = cctx.web?.fetchProviders;
+        const providerIds = providers === undefined ? [] : [...providers.keys()];
+        return { ok: true, value: { installed: providerIds.length > 0, providerIds } };
+      }, { authority: 'loopback' });
+      log.info(`omds-preset-seeder: /omds provider-status RPC registered${dispose ? '' : ''}`);
+    } catch (error) {
+      log.warn(`omds-preset-seeder: /omds RPC registration failed (${error?.message ?? error}); card falls back to toggle-only`);
+    }
+  });
+}
+
 export function apply(ctx) {
   const log = {
     info: (message) => ctx.logger?.info?.(message),
@@ -187,5 +211,6 @@ export function apply(ctx) {
     wireSettings(ctx, log).catch((error) => {
       log.warn(`omds-preset-seeder: settings namespace unavailable (${error?.message ?? error}); legacy JSON channel stays active`);
     });
+    wireProviderStatusRpc(ctx, log);
   }
 }

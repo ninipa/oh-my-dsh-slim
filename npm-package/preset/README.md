@@ -132,36 +132,6 @@ reports which changes apply immediately (effort/temperature) and which start wit
 **Conversational configuration** (no JSON editing needed): just say e.g. "change fixer's model to
 kimi-k3" or "disable the oracle role" — the orchestrator edits the JSON per the schema.
 
-**Advanced configuration: web_fetch (optional, opt-in)** — `web_fetch` is off by default. Enabling
-it takes two steps:
-
-1. **Install the provider** (host profile layer, once): add
-   `"@deepseek-ai/dsh-web-fetch-http": "^0.1.1-rc.2"` to
-   `$DSH_HOME/profiles/web/package.json`, run `pnpm install` there, and append to
-   `$DSH_HOME/profiles/web/cordis.patch.yml`:
-
-   ```yaml
-   - insert:
-       - id: web-fetch-http
-         name: '@deepseek-ai/dsh-web-fetch-http'
-   ```
-
-   Do NOT re-enable the host tool-web row; the preset's gate is the single switch. Restart
-   the GUI — the card's `web_fetch` toggle becomes enabled (provider detected).
-
-2. **Toggle it on**: Settings → Plugins → Plugin configuration → oh-my-dsh-slim → **web_fetch
-   tool** → Save → **restart DSH** (webFetch is composition-layer like role toggles; model /
-   effort / temperature remain apply-immediately).
-
-**Benefit**: after a search anchors the URL, the model fetches the target page text directly
-(official docs, source, registry) instead of repeating searches and stitching snippets.
-
-**Risk**: `dsh-web-fetch-http` is an **SSRF primitive** — no private/loopback/link-local
-blocking, no domain allowlist (upstream README: "must not be enabled near sensitive internal
-network targets"). Suitable for a single-user machine only; do not enable in deployments that
-can reach sensitive internal targets. Rollback: remove the patch section + dependency, restart.
-
-
 ## Roadmap
 
 - ~~**GUI configuration**~~ — **Done**: role toggles, per-role model selection (from your imported
