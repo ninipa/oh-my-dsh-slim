@@ -152,6 +152,13 @@ DSH_HOME=<临时目录> dsh --profile headless --patch scripts/probe-patch.headl
   deepseek-v4-flash-vision-exp）直读，或等上游支持附件转发
 - **web_search 走独立计费**：librarian 优先使用 MCP（免费通道）；web_search 由宿主搜索服务承担，
   每次调用产生一次独立的辅助模型请求，开放式调研任务建议在提示词中给出搜索预算
+- **委派子代理无法升级沙箱权限——预设会剥离多余升级字段（`sandbox-strip` 插件，属 workaround）**：
+  DSH 在启动时固定了子代理的文件策略与审批状态，但 `bash`/`edit`/`write` 工具 schema 仍暴露可选的
+  `sandbox_permissions`/`justification` 字段；部分模型会无意识地填上这些字段，而子代理本就无法升级，
+  多余参数只会触发参数校验错误（`invalid justification`、`not strictly wider`）。随预设分发的
+  `sandbox-strip` 插件会在 `tools/pre-execute` 阶段移除角色子代理调用中的这两个字段，并在结果末尾
+  附加 `[sandbox: stripped ...]` 提示让模型看到修正。顶层会话不受影响，仍可正常请求升级。
+  这是预设层的临时缓解而非根治：真正修复在上游——DSH 不应向权限已固定的子代理暴露升级字段
 
 ## 致谢
 

@@ -3,7 +3,7 @@
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -78,9 +78,14 @@ const loaderSrc = readFileSync(join(presetDir, 'config-loader.js'), 'utf8');
 if (/RUNTIME_DEFAULTS/.test(loaderSrc) && /temperature: 0\.1/.test(loaderSrc) && /maxTokens: 128000/.test(loaderSrc)) pass('runtime defaults live inside config-loader.js'); else fail('runtime defaults are not internal to config-loader.js');
 
 console.log('\n[3] plugin and schema');
-for (const file of ['config-loader.js', 'role-subagent.js', 'effort-by-role.js', 'subagent-result.js', 'oh-my-dsh-slim.schema.json']) {
+for (const file of ['config-loader.js', 'role-subagent.js', 'effort-by-role.js', 'subagent-result.js', 'oh-my-dsh-slim.schema.json', 'sandbox-strip.js']) {
   if (existsSync(join(presetDir, file))) pass(`${file} present`); else fail(`${file} missing`);
 }
+const stripRows = rows.filter((row) => row?.id === 'sandbox-strip');
+if (stripRows.length === 1 && stripRows[0]?.name === './sandbox-strip.js') pass('sandbox-strip registered exactly once'); else fail(`sandbox-strip row invalid: ${JSON.stringify(stripRows)}`);
+const stripSrc = readFileSync(join(presetDir, 'sandbox-strip.js'), 'utf8');
+if (/tools\/pre-execute/.test(stripSrc) && /dshRoleId/.test(stripSrc) && /sandbox_permissions/.test(stripSrc) && /tools\/post-execute/.test(stripSrc)) pass('sandbox-strip strips child escalation fields at pre-execute');
+else fail('sandbox-strip missing pre-execute stripping logic');
 const resultRows = rows.filter((row) => row?.name === './subagent-result.js');
 if (resultRows.length === 1) pass('subagent_result registered exactly once (singleton)'); else fail(`subagent-result.js must be registered exactly once, got ${resultRows.length}`);
 const resultSrc = readFileSync(join(presetDir, 'subagent-result.js'), 'utf8');
@@ -117,6 +122,23 @@ try {
 for (const row of rows.filter((row) => typeof row?.name === 'string' && row.name.startsWith('./'))) {
   if (existsSync(join(presetDir, row.name))) pass(`relative plugin ${row.name} resolves`); else fail(`relative plugin ${row.name} missing`);
 }
+
+console.log('\n[6] distribution sync');
+// The dev workspace keeps three identical composition copies: the root preset,
+// the publish staging copy and the bundled npm preset copy. The copies visible
+// from this script's own location must byte-match the composition it validates.
+const syncCopies = basename(root) === 'publish'
+  ? [join(root, '..', 'agent.cordis.yml'), join(root, '..', 'npm-package', 'preset', 'agent.cordis.yml')]
+  : basename(dirname(root)) === 'npm-package' && basename(root) === 'preset'
+    ? [join(root, '..', '..', 'agent.cordis.yml'), join(root, '..', '..', 'publish', 'agent.cordis.yml')]
+    : [join(root, 'publish', 'agent.cordis.yml'), join(root, 'npm-package', 'preset', 'agent.cordis.yml')];
+const composeSrc = readFileSync(composePath, 'utf8');
+let syncFailures = 0;
+for (const copy of syncCopies) {
+  if (!existsSync(copy)) { fail(`composition copy missing: ${copy}`); syncFailures++; continue; }
+  if (readFileSync(copy, 'utf8') !== composeSrc) { fail(`composition out of sync: ${copy}`); syncFailures++; }
+}
+if (syncFailures === 0) pass('composition copies are in sync');
 
 console.log(failures === 0 ? '\nT0: ALL CHECKS PASSED' : `\nT0: ${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

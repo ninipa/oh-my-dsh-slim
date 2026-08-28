@@ -59,6 +59,19 @@ detects `@deepseek-ai/dsh-web-fetch-http` (host-level install, see repo README).
 The provider is an SSRF primitive; do not enable in deployments that can reach
 sensitive internal targets.
 
+### Known limits: delegated children cannot escalate sandbox permissions
+
+DSH fixes a delegated child's file policy and approval state at startup, but
+the `bash`/`edit`/`write` tool schemas still expose optional
+`sandbox_permissions` / `justification` fields. Some models fill them
+unprompted, triggering parameter-validation errors (`invalid justification`,
+`not strictly wider`). The bundled `sandbox-strip` plugin removes the two
+fields from role-subagent child calls at the `tools/pre-execute` waterfall and
+appends a `[sandbox: stripped ...]` note to the result. Top-level sessions are
+untouched. This is a preset-level workaround — the real fix is upstream (DSH
+should not expose escalation fields to children with a fixed permission
+scope).
+
 ---
 
 ## 中文
@@ -97,6 +110,16 @@ oh-my-dsh-slim：角色开关/模型/思考档、高级 maxTokens/temperature、
 模型/思考档/温度改完立即生效（下一次委派）；角色开关、`webFetch` 与工具权限需重启
 DSH 生效。完整功能说明、配置指南与验收清单见
 [仓库 README](https://github.com/ninipa/oh-my-dsh-slim#readme)。
+
+### 已知边界：委派子代理无法升级沙箱权限
+
+DSH 在启动时固定了子代理的文件策略与审批状态，但 `bash`/`edit`/`write` 工具
+schema 仍暴露可选的 `sandbox_permissions`/`justification` 字段；部分模型会无意识
+填上，触发参数校验错误（`invalid justification`、`not strictly wider`）。随预设
+分发的 `sandbox-strip` 插件会在 `tools/pre-execute` 阶段移除角色子代理调用中的
+这两个字段，并在结果末尾附加 `[sandbox: stripped ...]` 提示。顶层会话不受影响。
+这是预设层的临时缓解而非根治——真正修复在上游 DSH（不应向权限固定的子代理暴露
+升级字段）。
 
 **`web_fetch`（可选，见仓库 README「进阶配置」）**：`webFetch` 默认关闭，开启后
 预设会话可注册 `web_fetch` 工具（需宿主层安装 fetch provider，卡片在检测到

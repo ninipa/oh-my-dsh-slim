@@ -132,36 +132,6 @@ reports which changes apply immediately (effort/temperature) and which start wit
 **Conversational configuration** (no JSON editing needed): just say e.g. "change fixer's model to
 kimi-k3" or "disable the oracle role" — the orchestrator edits the JSON per the schema.
 
-**Advanced configuration: web_fetch (optional, opt-in)** — `web_fetch` is off by default. Enabling
-it takes two steps:
-
-1. **Install the provider** (host profile layer, once): add
-   `"@deepseek-ai/dsh-web-fetch-http": "^0.1.1-rc.2"` to
-   `$DSH_HOME/profiles/web/package.json`, run `pnpm install` there, and append to
-   `$DSH_HOME/profiles/web/cordis.patch.yml`:
-
-   ```yaml
-   - insert:
-       - id: web-fetch-http
-         name: '@deepseek-ai/dsh-web-fetch-http'
-   ```
-
-   Do NOT re-enable the host tool-web row; the preset's gate is the single switch. Restart
-   the GUI — the card's `web_fetch` toggle becomes enabled (provider detected).
-
-2. **Toggle it on**: Settings → Plugins → Plugin configuration → oh-my-dsh-slim → **web_fetch
-   tool** → Save → **restart DSH** (webFetch is composition-layer like role toggles; model /
-   effort / temperature remain apply-immediately).
-
-**Benefit**: after a search anchors the URL, the model fetches the target page text directly
-(official docs, source, registry) instead of repeating searches and stitching snippets.
-
-**Risk**: `dsh-web-fetch-http` is an **SSRF primitive** — no private/loopback/link-local
-blocking, no domain allowlist (upstream README: "must not be enabled near sensitive internal
-network targets"). Suitable for a single-user machine only; do not enable in deployments that
-can reach sensitive internal targets. Rollback: remove the patch section + dependency, restart.
-
-
 ## Roadmap
 
 - ~~**GUI configuration**~~ — **Done**: role toggles, per-role model selection (from your imported
@@ -203,6 +173,17 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
 - **web_search is billed separately**: librarian prefers MCP (free). `web_search` runs through the
   host search service, which issues an independent auxiliary model request per query. For open-ended
   research, give the task a search budget in the prompt
+- **Delegated children cannot escalate sandbox permissions — the preset strips stray escalation
+  fields (`sandbox-strip` plugin, a workaround)**: DSH fixes a delegated child's file policy and
+  approval state at startup, but the `bash`/`edit`/`write` tool schemas still expose optional
+  `sandbox_permissions` / `justification` fields. Some models fill those fields unprompted; a child
+  cannot escalate anyway, so the extra arguments only trigger parameter-validation errors
+  (`invalid justification`, `not strictly wider`). The bundled `sandbox-strip` plugin removes the two
+  fields from role-subagent child tool calls at the `tools/pre-execute` waterfall and appends a
+  `[sandbox: stripped ...]` note to the result so the model sees the correction. Top-level sessions
+  are untouched and may still request escalation normally. This is a preset-level workaround, not a
+  fix: the real fix is upstream — DSH should stop exposing escalation fields to children whose
+  permission scope is fixed
 
 ## FAQ
 

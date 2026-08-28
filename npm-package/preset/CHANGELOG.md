@@ -4,6 +4,28 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.3.0] — 2026-08-28
+
+### Added
+
+- **`sandbox-strip` preset plugin — workaround for stray sandbox escalation
+  fields on delegated children**: DSH fixes a delegated child's file policy and
+  approval state at startup, but the `bash`/`edit`/`write` tool schemas still
+  expose optional `sandbox_permissions` / `justification` fields. Some models
+  fill them unprompted, producing `invalid justification` /
+  `not strictly wider` parameter-validation errors. The plugin removes the two
+  fields from role-subagent child tool calls at the `tools/pre-execute`
+  waterfall and appends a `[sandbox: stripped ...]` note to the tool result
+  (visible to the model, diagnosable in logs). Top-level sessions are
+  untouched. Scope guard: `agent.options.dshRoleId` (role-subagent-spawned
+  children only); if a future DSH version lets children escalate, revisit the
+  guard. This is a preset-level workaround — the real fix is upstream (DSH
+  should not expose escalation fields to children with a fixed permission
+  scope). A persona-level wording of the same rule was first shipped and then
+  removed: headless testing showed gpt-5.6-luna ignores the instruction
+  (14/14 calls still carried the fields), so the rule no longer pollutes role
+  personas; T0 keeps the strip plugin's presence and logic assertions instead.
+
 ## [0.2.1] — 2026-08-27
 
 ### Added

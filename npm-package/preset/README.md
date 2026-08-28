@@ -173,6 +173,17 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
 - **web_search is billed separately**: librarian prefers MCP (free). `web_search` runs through the
   host search service, which issues an independent auxiliary model request per query. For open-ended
   research, give the task a search budget in the prompt
+- **Delegated children cannot escalate sandbox permissions — the preset strips stray escalation
+  fields (`sandbox-strip` plugin, a workaround)**: DSH fixes a delegated child's file policy and
+  approval state at startup, but the `bash`/`edit`/`write` tool schemas still expose optional
+  `sandbox_permissions` / `justification` fields. Some models fill those fields unprompted; a child
+  cannot escalate anyway, so the extra arguments only trigger parameter-validation errors
+  (`invalid justification`, `not strictly wider`). The bundled `sandbox-strip` plugin removes the two
+  fields from role-subagent child tool calls at the `tools/pre-execute` waterfall and appends a
+  `[sandbox: stripped ...]` note to the result so the model sees the correction. Top-level sessions
+  are untouched and may still request escalation normally. This is a preset-level workaround, not a
+  fix: the real fix is upstream — DSH should stop exposing escalation fields to children whose
+  permission scope is fixed
 
 ## FAQ
 

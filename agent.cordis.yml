@@ -223,6 +223,9 @@
 - id: subagent-result
   name: './subagent-result.js'
 
+- id: sandbox-strip
+  name: './sandbox-strip.js'
+
 # oracle — strategic technical advisor, READ-ONLY
 - id: tool-subagent-oracle
   name: './role-subagent.js'
