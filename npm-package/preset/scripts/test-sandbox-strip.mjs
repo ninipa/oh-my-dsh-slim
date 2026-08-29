@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isDelegatedChild, stripEscalationArgs, STRIP_NOTE } from '../sandbox-strip.js';
+import { isDelegatedChild, stripEscalationArgs, escalationArgsAreDoomed, STRIP_NOTE, TOP_STRIP_NOTE } from '../sandbox-strip.js';
 
 let failures = 0;
 const pass = (msg) => console.log(`  PASS  ${msg}`);
@@ -69,6 +69,41 @@ const extraOut = stripEscalationArgs(withExtra);
 if (extraOut.run_in_background === true && extraOut.timeoutMs === 10000 && !('sandbox_permissions' in extraOut) && !('justification' in extraOut)) pass('U6 host fields kept, only escalation pair removed');
 else fail('U6 host field preservation wrong');
 
+console.log('\n[sandbox-strip] doomed-shape detection (top-level)');
+// Mirror of the host WIDER_MODES table (read-only / workspace-write keys).
+const WIDER = { 'read-only': ['workspace-write', 'danger-full-access'], 'workspace-write': ['danger-full-access'] };
+const doomed = (sp, j, mode) => escalationArgsAreDoomed(sp, j, mode, WIDER);
+// no fields -> not doomed (nothing to strip)
+if (!doomed(undefined, undefined, 'workspace-write')) pass('no fields: not doomed');
+else fail('no fields misjudged as doomed');
+// empty justification -> always doomed regardless of mode
+if (doomed('danger-full-access', '', 'workspace-write')) pass('empty justification doomed (widening pair)');
+else fail('empty justification not doomed');
+if (doomed('danger-full-access', '   ', 'workspace-write')) pass('whitespace justification doomed');
+else fail('whitespace justification not doomed');
+// pairing rules
+if (doomed('workspace-write', undefined, 'read-only')) pass('permissions without justification doomed');
+else fail('permissions-only not doomed');
+if (doomed(undefined, 'some reason', 'read-only')) pass('justification without permissions doomed');
+else fail('justification-only not doomed');
+// widening: read-only mode
+if (!doomed('workspace-write', 'reason', 'read-only')) pass('read-only -> workspace-write legitimate (kept)');
+else fail('read-only -> workspace-write misjudged doomed');
+if (!doomed('danger-full-access', 'reason', 'read-only')) pass('read-only -> full-access legitimate (kept)');
+else fail('read-only -> full-access misjudged doomed');
+// widening: workspace-write mode
+if (!doomed('danger-full-access', 'reason', 'workspace-write')) pass('workspace-write -> full-access legitimate (kept)');
+else fail('workspace-write -> full-access misjudged doomed');
+if (doomed('workspace-write', 'reason', 'workspace-write')) pass('same-mode escalation doomed');
+else fail('same-mode escalation not doomed');
+if (doomed('read-only', 'reason', 'workspace-write')) pass('narrower-mode escalation doomed');
+else fail('narrower-mode escalation not doomed');
+// unknown mode -> widening table defaults to empty -> any permissions doomed
+if (doomed('workspace-write', 'reason', 'danger-full-access')) pass('full-access mode: no wider target, doomed');
+else fail('full-access escalation not doomed');
+if (doomed('workspace-write', 'reason', 'unknown-mode')) pass('unknown mode: fallback empty table -> doomed');
+else fail('unknown mode not doomed');
+
 console.log('\n[sandbox-strip] plugin surface');
 const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'sandbox-strip.js'), 'utf8');
 if (/tools\/pre-execute/.test(src) && /exec\.arguments =/.test(src)) pass('pre-execute replaces exec.arguments');
@@ -77,6 +112,8 @@ if (/tools\/post-execute/.test(src) && /STRIP_NOTE/.test(src)) pass('post-execut
 else fail('post-execute note wiring missing');
 if (typeof STRIP_NOTE === 'string' && STRIP_NOTE.length > 40) pass('STRIP_NOTE exported');
 else fail('STRIP_NOTE missing or too short');
+if (typeof TOP_STRIP_NOTE === 'string' && TOP_STRIP_NOTE.includes('legitimate escalation')) pass('TOP_STRIP_NOTE exported with kept-escalation wording');
+else fail('TOP_STRIP_NOTE missing or wrong wording');
 
 console.log(failures === 0 ? '\nSANDBOX-STRIP: ALL CHECKS PASSED' : `\nSANDBOX-STRIP: ${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

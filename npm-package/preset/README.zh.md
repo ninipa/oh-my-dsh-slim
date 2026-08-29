@@ -157,8 +157,11 @@ DSH_HOME=<临时目录> dsh --profile headless --patch scripts/probe-patch.headl
   `sandbox_permissions`/`justification` 字段；部分模型会无意识地填上这些字段，而子代理本就无法升级，
   多余参数只会触发参数校验错误（`invalid justification`、`not strictly wider`）。随预设分发的
   `sandbox-strip` 插件会在 `tools/pre-execute` 阶段移除角色子代理调用中的这两个字段，并在结果末尾
-  附加 `[sandbox: stripped ...]` 提示让模型看到修正。顶层会话不受影响，仍可正常请求升级。
-  这是预设层的临时缓解而非根治：真正修复在上游——DSH 不应向权限已固定的子代理暴露升级字段
+  附加 `[sandbox: stripped ...]` 提示让模型看到修正。在本预设自己的**顶层会话**中，它还会剥离
+  那些在任何审批前都必然被拒的形态（空 justification、单字段配对、非更宽模式——用宿主同一张
+  `WIDER_MODES` 表判定）；**合法升级请求（更宽模式 + 非空理由）保留，照常请求批准**。不使用本
+  预设的会话不会加载该插件，行为零变化。这是预设层的临时缓解而非根治：真正修复在上游——DSH
+  不应向权限已固定的子代理暴露升级字段
 
 ## 致谢
 

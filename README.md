@@ -180,9 +180,13 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
   cannot escalate anyway, so the extra arguments only trigger parameter-validation errors
   (`invalid justification`, `not strictly wider`). The bundled `sandbox-strip` plugin removes the two
   fields from role-subagent child tool calls at the `tools/pre-execute` waterfall and appends a
-  `[sandbox: stripped ...]` note to the result so the model sees the correction. Top-level sessions
-  are untouched and may still request escalation normally. This is a preset-level workaround, not a
-  fix: the real fix is upstream — DSH should stop exposing escalation fields to children whose
+  `[sandbox: stripped ...]` note to the result so the model sees the correction. In this preset's
+  own top-level sessions it additionally strips only the shapes DSH would always reject before any
+  approval prompt (empty justification, single-field pairs, non-widening modes — judged with the
+  host's own WIDER_MODES table); **legitimate escalation requests (strictly wider mode +
+  non-empty justification) are kept and still prompt for approval**. Sessions that do not use this
+  preset never load the plugin, so their behavior is unchanged. This is a preset-level workaround,
+  not a fix: the real fix is upstream — DSH should stop exposing escalation fields to children whose
   permission scope is fixed
 
 ## FAQ

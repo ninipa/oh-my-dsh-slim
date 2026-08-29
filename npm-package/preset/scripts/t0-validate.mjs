@@ -86,6 +86,8 @@ if (stripRows.length === 1 && stripRows[0]?.name === './sandbox-strip.js') pass(
 const stripSrc = readFileSync(join(presetDir, 'sandbox-strip.js'), 'utf8');
 if (/tools\/pre-execute/.test(stripSrc) && /dshRoleId/.test(stripSrc) && /sandbox_permissions/.test(stripSrc) && /tools\/post-execute/.test(stripSrc)) pass('sandbox-strip strips child escalation fields at pre-execute');
 else fail('sandbox-strip missing pre-execute stripping logic');
+if (/escalationArgsAreDoomed/.test(stripSrc) && /TOP_STRIP_NOTE/.test(stripSrc) && /sandboxPolicy/.test(stripSrc) && /WIDER_MODES/.test(stripSrc)) pass('sandbox-strip strips only doomed shapes at top level, keeps legitimate escalations');
+else fail('sandbox-strip missing top-level doomed-shape handling');
 const resultRows = rows.filter((row) => row?.name === './subagent-result.js');
 if (resultRows.length === 1) pass('subagent_result registered exactly once (singleton)'); else fail(`subagent-result.js must be registered exactly once, got ${resultRows.length}`);
 const resultSrc = readFileSync(join(presetDir, 'subagent-result.js'), 'utf8');

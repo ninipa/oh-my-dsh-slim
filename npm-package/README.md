@@ -67,10 +67,13 @@ the `bash`/`edit`/`write` tool schemas still expose optional
 unprompted, triggering parameter-validation errors (`invalid justification`,
 `not strictly wider`). The bundled `sandbox-strip` plugin removes the two
 fields from role-subagent child calls at the `tools/pre-execute` waterfall and
-appends a `[sandbox: stripped ...]` note to the result. Top-level sessions are
-untouched. This is a preset-level workaround — the real fix is upstream (DSH
-should not expose escalation fields to children with a fixed permission
-scope).
+appends a `[sandbox: stripped ...]` note to the result. In this preset's own
+top-level sessions it additionally strips only the shapes DSH would always
+reject before any approval prompt (empty justification, single-field pairs,
+non-widening modes); legitimate escalation requests (strictly wider mode +
+non-empty justification) are kept and still prompt for approval. This is a
+preset-level workaround — the real fix is upstream (DSH should not expose
+escalation fields to children with a fixed permission scope).
 
 ---
 
@@ -117,7 +120,9 @@ DSH 在启动时固定了子代理的文件策略与审批状态，但 `bash`/`e
 schema 仍暴露可选的 `sandbox_permissions`/`justification` 字段；部分模型会无意识
 填上，触发参数校验错误（`invalid justification`、`not strictly wider`）。随预设
 分发的 `sandbox-strip` 插件会在 `tools/pre-execute` 阶段移除角色子代理调用中的
-这两个字段，并在结果末尾附加 `[sandbox: stripped ...]` 提示。顶层会话不受影响。
+这两个字段，并在结果末尾附加 `[sandbox: stripped ...]` 提示。在本预设自己的顶层
+会话中，它还会剥离那些在任何审批前都必然被拒的形态（空 justification、单字段
+配对、非更宽模式）；**合法升级请求（更宽模式 + 非空理由）保留，照常请求批准**。
 这是预设层的临时缓解而非根治——真正修复在上游 DSH（不应向权限固定的子代理暴露
 升级字段）。
 

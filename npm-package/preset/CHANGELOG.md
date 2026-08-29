@@ -4,6 +4,20 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.3.1] — 2026-08-29
+
+### Added
+
+- **`sandbox-strip` top-level handling**: the plugin now also strips DOOMED
+  escalation shapes (empty justification, single-field pairs, non-widening
+  modes — judged with the host's WIDER_MODES table) from top-level tool calls
+  in this preset's own sessions. Legitimate escalation requests (strictly
+  wider mode + non-empty justification) are kept and still prompt for
+  approval. Non-preset sessions never load the plugin (unchanged behavior).
+  Verified headless with gpt-5.6-luna (natural injection stripped + note),
+  a legitimate-escalation control (kept, approval path intact) and a stock
+  preset control (zero stripping).
+
 ## [0.3.0] — 2026-08-28
 
 ### Added
