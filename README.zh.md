@@ -114,6 +114,35 @@ git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-
 **对话式配置**（无需手编 JSON）：在会话里直接说，例如"帮我把 fixer 的模型换成 kimi-k3"或
 "关闭 oracle 角色"——主模型会按 schema 修改上述 JSON。
 
+## 进阶配置：启用 web_fetch（可选，自担风险）
+
+公开预设默认不启用 `web_fetch`（stock DSH 未捆绑 fetch provider，只提供 `web_search`）。
+启用需要两步：**① 安装 provider（宿主层，一次性） ② 在设置卡片打开开关**。
+
+**① 安装 provider**（`@deepseek-ai/dsh-web-fetch-http`，宿主 profile 层，不修改预设）：
+
+1. 在 `$DSH_HOME/profiles/web/package.json` 的 `dependencies` 加
+   `"@deepseek-ai/dsh-web-fetch-http": "^0.1.1-rc.2"`（版本随宿主 DSH 对齐），然后
+   `pnpm install`（目录在 `$DSH_HOME/profiles/web`）。
+2. 编辑 `$DSH_HOME/profiles/web/cordis.patch.yml` 追加一段（**不要**启用宿主的 tool-web 行）：
+   ```yaml
+   - insert:
+       - id: web-fetch-http
+         name: '@deepseek-ai/dsh-web-fetch-http'
+   ```
+3. 重启 GUI——provider 就绪，设置卡片中 web_fetch 开关变为可拨。
+
+**② 打开开关**：设置 → 插件配置 → 展开 oh-my-dsh-slim 卡片 → 打开「web_fetch 工具」→
+**保存** → **重启 DSH** 生效（webFetch 是组合层配置，与角色启停同类：变更需重启进程；
+角色模型/思考档等其余配置改完即生效，无需重启）。
+
+**收益**：搜索定位 URL 后可直接抓取目标页原文（官方文档/源码/registry 等），减少反复搜索
+拼凑片段。
+
+**风险**：`dsh-web-fetch-http` 是 **SSRF primitive**——无内网/回环/链路本地地址拦截、无域名
+白名单（官方 README 原文 "must not be enabled near sensitive internal network targets"）。
+仅适合单机可控环境；内网可达敏感目标的部署不要启用。回滚 = 删除 patch 段 + 移除依赖并重启。
+
 ## 即将发布（Roadmap）
 
 - ~~**GUI 配置界面**~~ —— **已完成**：角色开关、按角色选择模型（从你导入的 provider 中选，
@@ -149,7 +178,9 @@ DSH_HOME=<临时目录> dsh --profile headless --patch scripts/probe-patch.headl
 
 - **非 vision 主模型无法接收粘贴图片**：rc.2 在发送时按主模型能力硬拦
   （`MODEL_DOES_NOT_SUPPORT_IMAGES`）。需要图片分析请换 vision 主模型（如
-  deepseek-v4-flash-vision-exp）直读，或等上游支持附件转发
+  deepseek-v4-flash-vision-exp）直读，或等上游支持附件转发。若你的模型实际支持图像但
+  仍被拦截，检查 provider 配置中该模型是否声明了图像输入能力
+  （`input: ["text", "image"]`）——第三方 GPT 类模型常见此缺漏
 - **web_search 走独立计费**：librarian 优先使用 MCP（免费通道）；web_search 由宿主搜索服务承担，
   每次调用产生一次独立的辅助模型请求，开放式调研任务建议在提示词中给出搜索预算
 - **委派子代理无法升级沙箱权限——预设会剥离多余升级字段（`sandbox-strip` 插件，属 workaround）**：
