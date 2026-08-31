@@ -233,10 +233,15 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
   plugin mitigates this by supplying the model with facts: a live "currently running background
   subagents" block in the system prompt (re-rendered every turn, same mechanism as the host's
   `sandbox:policy`), a "Decision point" reminder attached to every successful delegation result,
-  and a persona clause against claiming completion while a child is unsettled. In practice the
-  delegation turn now reports "still running; cannot output a final conclusion yet" and waits for
-  the settle notice, which wakes the main model to integrate the result. The model may still end its
-  turn before the child settles (no force-wait), but it no longer misreports completion
+  and a persona clause against claiming completion while a child is unsettled. Since 0.3.3 the
+  ledger is three-state (`running` → `reported` → `settled`): a child's **report** ("Background
+  subagent X reported:") is shown as "已回报内容，等待正式完成通知（reported ≠ 完成）" — a report
+  neither concludes the child's turn nor changes its lifetime, and only the **finish notice**
+  (unconditional for every established child, incl. failure/cancel/token-ceiling) settles it, so
+  the orchestrator no longer announces "the subagent is done" tens of seconds early. In practice
+  the delegation turn reports "still running; cannot output a final conclusion yet", defers
+  dependent work until the finish notice, and wakes to integrate the result. The model may still
+  end its turn before the child settles (no force-wait), but it no longer misreports completion
 
 ## FAQ
 

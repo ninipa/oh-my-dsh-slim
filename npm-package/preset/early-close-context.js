@@ -13,10 +13,22 @@
 //   2. an `additionalContexts` decision-point reminder attached to every
 //      successful delegation tool result ("you will be notified; do not
 //      conclude before it settles").
-// A light ledger (childId -> {role,label,parentId}) feeds both; it is
-// refreshed lazily from `ctx.subagents.listChildren` on each render (async
-// refresh, sync render — the render returns the last snapshot, one turn of
-// staleness max, which the delegation reminder covers on the next turn).
+//
+// A light ledger (childId -> {role,label,parentId,status}) feeds both. Status
+// is three-state, mirroring the host's own delivery vocabulary
+// (dsh-subagent: `subagent-report` relay vs `subagent-settled` notice):
+//   running  — started, nothing reported back yet;
+//   reported — the child relayed content ("Background subagent X reported:"),
+//              but a report neither concludes its turn nor changes its
+//              Activation lifetime — it may keep working, and only its
+//              finish notice (unconditional for every established child,
+//              incl. failure/cancel/token-ceiling paths) settles it;
+//   settled  — finish notice seen (or listChildren no longer reports the
+//              child running — the fallback that also covers a lost notice).
+// The ledger is updated from two sources: delegation tool results
+// (post-execute, sync) and an incremental scan of the parent session's
+// inbox-splice events (async, on render; source.kind is authoritative, no
+// text matching). listChildren refresh stays as the settle fallback.
 //
 // Scope: preset-only composition (like sandbox-strip); non-preset sessions
 // never load it. In-process continuation provider required (listChildren).
@@ -60,47 +72,86 @@ export const inject = ['systemPrompt', 'subagents'];
 /** Prompt order: right after role-subagent's delegation-policy section (116.5). */
 export const RUNNING_SECTION_ORDER = 117;
 
-/** One delegated background child in the ledger. */
-const ledger = new Map(); // childId -> { role, label, parentId, since }
-/** Pending delegation calls awaiting their tool result (WeakMap on exec). */
-const pending = new WeakMap();
-/** Per-parent refresh throttle (avoid stacking listChildren on hot prompts). */
-const lastRefreshAt = new Map(); // parentId -> timestamp
-const REFRESH_MIN_INTERVAL_MS = 800;
+/** Ledger child statuses. */
+export const STATUS_RUNNING = 'running';
+export const STATUS_REPORTED = 'reported';
 
-/** Render the running-children block for one agent session (sync). */
-export function renderRunning(parentId) {
-  const rows = [...ledger.values()]
-    .filter((entry) => entry.parentId === parentId)
-    .sort((a, b) => a.since - b.since);
-  if (rows.length === 0) return '';
-  const lines = rows.map((entry) => `- ${entry.role} "${entry.label}" (${entry.childId}) — started ${entry.sinceLabel}`);
-  return 'Currently running background subagents delegated by you (they have NOT settled yet):\n'
-    + lines.join('\n')
-    + '\nDo not output a final conclusion while any of them is still running. You will receive a notice when one settles; integrate its result (or explicitly report it as still running) before concluding.';
+/** One delegated background child in the ledger. */
+// childId -> { role, label, parentId, since, sinceLabel, childId, status }
+
+/**
+* Classify one inbox-splice message source as a child delivery.
+* The host's own vocabulary (dsh-subagent lib):
+*   - {kind: 'subagent-report', senderSessionId} — relayed content; the child
+*     keeps running (report does not conclude its turn or change lifetime);
+*   - {kind: 'subagent-settled', senderSessionId} — unconditional finish
+*     notice (completed/failed/cancelled/token-ceiling all deliver one).
+* @param source - a message source object.
+* @returns 'report' | 'settled' | undefined.
+*/
+export function classifyDeliverySource(source) {
+  if (typeof source !== 'object' || source === null) return void 0;
+  if (source.kind === 'subagent-report' && typeof source.senderSessionId === 'string') return 'report';
+  if (source.kind === 'subagent-settled' && typeof source.senderSessionId === 'string') return 'settled';
+  return void 0;
 }
 
-/** Lazy async ledger refresh: keep only children the host still reports running. */
-async function refreshLedger(ctx, parentId) {
-  const now = Date.now();
-  const last = lastRefreshAt.get(parentId) ?? 0;
-  if (now - last < REFRESH_MIN_INTERVAL_MS) return;
-  lastRefreshAt.set(parentId, now);
-  try {
-    const signal = new AbortController().signal;
-    const rows = await ctx.subagents.listChildren(parentId, signal);
-    const running = new Set(rows
-      .filter((row) => row?.kind === 'child' && row.activity === 'running')
-      .map((row) => row.id));
-    for (const childId of [...ledger.keys()]) {
-      const entry = ledger.get(childId);
-      if (entry !== void 0 && entry.parentId === parentId && !running.has(childId)) ledger.delete(childId);
-    }
-  } catch (error) {
-    const msg = `early-close-context: listChildren refresh failed: ${error instanceof Error ? error.message : String(error)}`;
-    if (process.env.ECC_DEBUG === '1') console.error(`[ecc] ${msg}`);
-    ctx.logger?.warn?.(msg);
+/**
+* Extract child deliveries from one agent/inbox/spliced event's inserted
+* messages. Pure — testable without a live session.
+* @param spliceEvent - an event whose `data.inserted` are messages.
+* @returns [{childId, kind}] in insertion order.
+*/
+export function deliveriesOf(spliceEvent) {
+  const inserted = spliceEvent?.data?.inserted;
+  if (!Array.isArray(inserted)) return [];
+  const out = [];
+  for (const msg of inserted) {
+    const kind = classifyDeliverySource(msg?.source);
+    if (kind !== void 0) out.push({ childId: msg.source.senderSessionId, kind });
   }
+  return out;
+}
+
+/**
+* Apply one delivery to a ledger entry's status.
+* @param entry - the ledger entry, mutated in place.
+* @param kind - 'report' (running -> reported) or 'settled' (remove).
+* @returns true when the entry changed (report) or was removed (settled).
+*/
+export function applyDelivery(entry, kind) {
+  if (entry === void 0) return false;
+  if (kind === 'report') {
+    if (entry.status !== STATUS_REPORTED) {
+      entry.status = STATUS_REPORTED;
+      entry.reportedAt = Date.now();
+      return true;
+    }
+    return false;
+  }
+  if (kind === 'settled') {
+    entry.status = 'settled';
+    entry.settledAt = Date.now();
+    return true;
+  }
+  return false;
+}
+
+/**
+* Render the running-children block for one parent's ledger rows (sync).
+* Rows must already be filtered to the parent and sorted.
+* @param rows - ledger entries for one parent.
+* @returns the prompt block text, or '' when nothing is running/reported.
+*/
+export function renderRows(rows) {
+  const active = (rows ?? []).filter((entry) => entry !== void 0 && entry.status !== 'settled');
+  if (active.length === 0) return '';
+  const lines = active.map((entry) => entry.status === STATUS_REPORTED
+    ? `- ${entry.role} "${entry.label}" (${entry.childId}) — 已回报内容，等待正式完成通知（reported ≠ 完成）`
+    : `- ${entry.role} "${entry.label}" (${entry.childId}) — 仍在运行（started ${entry.sinceLabel}）`);
+  return 'Currently running background subagents delegated by you (they have NOT settled yet):\n'
+    + lines.join('\n')
+    + '\nA subagent report is not its completion: only its finish notice settles it. Do not output a final conclusion while any of them is unsettled; with multiple subagents, state each one\'s status individually — never summarize them as "the subagent is done" collectively.';
 }
 
 /** Extract the first UUID from a delegation result text (childId). */
@@ -131,6 +182,39 @@ export function isDelegationTool(name) {
 }
 
 export function apply(ctx, config) {
+  /** childId -> { role, label, parentId, since, sinceLabel, childId, status } */
+  const ledger = new Map();
+  /** Pending delegation calls awaiting their tool result (WeakMap on exec). */
+  const pending = new WeakMap();
+  /** Per-parent last scanned session seq (incremental inbox-splice scan). */
+  const lastScanSeq = new Map(); // parentId -> seq
+  /** Per-parent refresh throttle (avoid stacking listChildren on hot prompts). */
+  const lastRefreshAt = new Map(); // parentId -> timestamp
+  const REFRESH_MIN_INTERVAL_MS = 800;
+
+  /** Incremental scan: apply child deliveries from inbox-splice events. */
+  function scanSessionEvents(session, parentId) {
+    const from = lastScanSeq.get(parentId) ?? 0;
+    let last = from;
+    for (const event of session.events ?? []) {
+      const seq = typeof event.seq === 'number' ? event.seq : 0;
+      if (seq <= from) continue;
+      if (seq > last) last = seq;
+      if (event.type !== 'agent/inbox/spliced') continue;
+      for (const { childId, kind } of deliveriesOf(event)) {
+        const entry = ledger.get(childId);
+        if (entry === void 0 || entry.parentId !== parentId) continue;
+        if (kind === 'settled') {
+          ledger.delete(childId);
+        } else {
+          applyDelivery(entry, kind);
+        }
+        if (process.env.ECC_DEBUG === '1') console.error(`[ecc] delivery ${kind} for ${childId} (parent ${parentId})`);
+      }
+    }
+    lastScanSeq.set(parentId, last);
+  }
+
   // Track role delegations at the pre-execute waterfall (works for both the
   // preset's role tools and any stock subagent tool that may be enabled).
   ctx.on('tools/pre-execute', async (exec, next) => {
@@ -158,10 +242,8 @@ export function apply(ctx, config) {
       since: Date.now(),
       sinceLabel: new Date().toLocaleTimeString(),
       childId,
+      status: STATUS_RUNNING,
     });
-    // Fire-and-forget refresh so the injected block appears as soon as
-    // possible; the reminder below already covers the immediate next turn.
-    void refreshLedger(ctx, info.parentId);
     // Waterfall decision: return it directly (next() drops arguments in the
     // cordis waterfall). additionalContexts are spliced into the agent inbox
     // for the next step, so each item must be a full message
@@ -169,11 +251,35 @@ export function apply(ctx, config) {
     return {
       kind: 'accept',
       additionalContexts: [createUserMessage({
-        content: [{ type: 'text', text: `Decision point: background ${info.role} "${info.label}" (${childId}) is now running and has NOT settled. Do not output a final conclusion until you receive its settle notice (or explicitly report it as still running); you may continue other work meanwhile.` }],
+        content: [{ type: 'text', text: `Decision point: background ${info.role} "${info.label}" (${childId}) is now running and has NOT settled. A report from this subagent may arrive before its finish notice — treat the finish notice, not the report, as completion. Do not output a final conclusion until you receive its settle notice (or explicitly report it as still running); you may continue other work meanwhile.` }],
         source: { kind: 'plugin', plugin: 'early-close-context' },
       })],
     };
   });
+
+  // Lazy async ledger refresh: keep only children the host still reports
+  // running (the settle fallback — covers a lost/dropped finish notice).
+  async function refreshLedger(parentId) {
+    const now = Date.now();
+    const last = lastRefreshAt.get(parentId) ?? 0;
+    if (now - last < REFRESH_MIN_INTERVAL_MS) return;
+    lastRefreshAt.set(parentId, now);
+    try {
+      const signal = new AbortController().signal;
+      const rows = await ctx.subagents.listChildren(parentId, signal);
+      const running = new Set(rows
+        .filter((row) => row?.kind === 'child' && row.activity === 'running')
+        .map((row) => row.id));
+      for (const childId of [...ledger.keys()]) {
+        const entry = ledger.get(childId);
+        if (entry !== void 0 && entry.parentId === parentId && !running.has(childId)) ledger.delete(childId);
+      }
+    } catch (error) {
+      const msg = `early-close-context: listChildren refresh failed: ${error instanceof Error ? error.message : String(error)}`;
+      if (process.env.ECC_DEBUG === '1') console.error(`[ecc] ${msg}`);
+      ctx.logger?.warn?.(msg);
+    }
+  }
 
   // Dynamic system-prompt block — same mechanism as host `sandbox:policy`.
   ctx.inject(['systemPrompt'], (scope) => {
@@ -183,9 +289,13 @@ export function apply(ctx, config) {
       text: (context) => {
         const session = context.agent?.session;
         if (session === void 0) return '';
-        void refreshLedger(ctx, session.id);
-        const rendered = renderRunning(session.id);
-        if (process.env.ECC_DEBUG === '1') console.error(`[ecc] text() rendered for ${session.id}: ${JSON.stringify(rendered.slice(0, 120))}`);
+        scanSessionEvents(session, session.id);
+        void refreshLedger(session.id);
+        const rows = [...ledger.values()]
+          .filter((entry) => entry.parentId === session.id && entry.status !== 'settled')
+          .sort((a, b) => a.since - b.since);
+        const rendered = renderRows(rows);
+        if (process.env.ECC_DEBUG === '1') console.error(`[ecc] text() rendered for ${session.id}: ${JSON.stringify(rendered.slice(0, 160))}`);
         return rendered;
       },
     });

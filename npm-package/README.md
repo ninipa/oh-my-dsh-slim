@@ -84,9 +84,15 @@ claiming "done" without the child's result. The bundled `early-close-context`
 plugin mitigates this with facts: a live "currently running background
 subagents" block in the system prompt (re-rendered every turn), a "Decision
 point" reminder on every successful delegation result, and a persona clause
-against claiming completion while a child is unsettled. The model may still
-end its turn before the child settles (no force-wait), but it no longer
-misreports completion — the settle notice wakes it to integrate the result.
+against claiming completion while a child is unsettled. Since 0.3.3 the ledger
+is three-state (`running` → `reported` → `settled`): a child's **report** is
+shown as "已回报内容，等待正式完成通知（reported ≠ 完成）" — a report neither
+concludes the child's turn nor changes its lifetime, and only the **finish
+notice** (unconditional for every established child, incl. failure/cancel/
+token-ceiling) settles it, so the model no longer announces "the subagent is
+done" before the finish notice arrives. The model may still end its turn
+before the child settles (no force-wait), but it no longer misreports
+completion — the settle notice wakes it to integrate the result.
 
 ---
 
@@ -146,8 +152,12 @@ DSH 是回合制——模型要么输出要么结束回合，机制层面无法�
 随预设分发的 `early-close-context` 插件用**事实供给**缓解：system prompt 每回合
 注入"当前运行中的后台子代理"块（与宿主 `sandbox:policy` 同一动态机制）、每次
 派发成功的结果附加 "Decision point" 提醒、persona 增加"子代理未 settle 前不得
-声称完成"条款。模型仍可能在子代理完成前结束回合（无强制等待），但**不再谎报
-完成**——settle 通知会唤醒主模型整合结果。
+声称完成"条款。**0.3.3 起账本三态（running → reported → settled）**：子代理的
+**report**（"Background subagent X reported:"）被明确标注为"已回报内容，等待正式
+完成通知（reported ≠ 完成）"——report 既不结束子代理回合也不改变其生命周期，
+只有 **finish 通知**（对每个已建立子代理无条件发送，含失败/取消/token 上限路径）
+才算结算，主模型不再提前数十秒宣布"子代理已完成"。模型仍可能在子代理完成前
+结束回合（无强制等待），但**不再谎报完成**——settle 通知会唤醒主模型整合结果。
 
 **`web_fetch`（可选，见仓库 README「进阶配置」）**：`webFetch` 默认关闭，开启后
 预设会话可注册 `web_fetch` 工具（需宿主层安装 fetch provider，卡片在检测到

@@ -4,6 +4,44 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.3.3] — 2026-08-31
+
+### Changed
+
+- **`early-close-context` three-state ledger — reported ≠ finished**.
+  Real-project usage exposed a boundary: the orchestrator treated a child's
+  **report** ("Background subagent X reported:") as its completion and
+  announced "the subagent is done" before the finish notice arrived (up to
+  tens of seconds early). The host's own vocabulary separates the two:
+  `subagent-report` (a relayed content message that neither concludes the
+  child's turn nor changes its Activation lifetime — the child may keep
+  working and report again) vs `subagent-settled` (the unconditional finish
+  notice every established child eventually gets, covering completion,
+  failure, cancellation and token-ceiling paths alike).
+  The plugin now tracks three states — `running` → `reported` → `settled` —
+  driven by an incremental scan of the parent session's inbox-splice events
+  keyed on the message `source.kind` (authoritative, no text matching):
+  - the injected system-prompt block renders reported children distinctly
+    ("已回报内容，等待正式完成通知（reported ≠ 完成）") and warns against
+    collectively summarizing multiple subagents;
+  - the delegation Decision-point reminder now states that a report may
+    arrive before the finish notice, and only the finish notice settles the
+    child;
+  - the persona clause gains "a report is not completion" + per-subagent
+    status reporting;
+  - the `listChildren` refresh stays as the settle fallback, so a lost
+    finish notice can never pin the ledger.
+  Verified: unit tests extended to 20 cases (delivery classification /
+  extraction / three-state transitions / distinct rendering) — all green;
+  headless run confirms `report` and `settled` deliveries are recognized by
+  `source.kind` and the ledger clears on settle. Production GUI (real
+  project, after restart): the delegation turn now says "已提交报告，但还
+  没有正式结束；我会把它视为仍在运行" and defers network work until the
+  finish notice ("已正式结束"), in direct contrast to the pre-0.3.3
+  early-close behaviour; a multi-report session (report ×2 → integrate →
+  finish → confirm) also behaves correctly.
+
+
 ## [0.3.2] — 2026-08-31
 
 ### Added
