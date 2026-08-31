@@ -4,6 +4,38 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.3.2] — 2026-08-31
+
+### Added
+
+- **`early-close-context` preset plugin — first-phase mitigation for the
+  "orchestrator closes early" failure**: a main model can emit a final
+  conclusion while a background subagent it delegated is still running
+  (claiming "done" without integrating the child's result). DSH offers no
+  mechanism-level wait barrier (turn-based loop; mechanism research in the
+  repo's HANDOFF §5), so the plugin supplies the model with FACTS instead:
+  1. a live **"currently running background subagents" block** injected into
+     the system prompt on every assembly (same dynamic `systemPrompt.context`
+     mechanism as the host's `sandbox:policy`), fed by a light ledger of
+     delegated children (`ctx.subagents.listChildren`, lazy refresh — async
+     refresh, sync render, at most one turn of staleness);
+  2. a **`Decision point` reminder** attached to every successful delegation
+     tool result ("do not output a final conclusion until you receive its
+     settle notice").
+  Plus a persona clause: never claim completion while a delegated subagent is
+  unsettled.
+  Verified headless (intelalloc gpt-5.6-luna: induced-scenario control 3/3
+  claimed-done vs fixed 3/3 honest "still running / waiting for the settle
+  notice"; natural scenario 2/3 claimed-done vs 2/2 honest; fast-subagent
+  delivery → wake-up → integration intact; parallel multi-subagent boundary
+  fixed) and on the production GUI (gpt-5.6-sol/medium: the delegation turn
+  now says "still running; cannot output a final conclusion yet" and waits
+  for the settle notice instead of closing early).
+  Known boundary: the model may still end its turn while the child runs
+  (turn-based constraint — no force-wait), but it no longer misreports
+  completion; the settle notice wakes it to integrate the result.
+
+
 ## [0.3.1] — 2026-08-29
 
 ### Added

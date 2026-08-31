@@ -75,6 +75,19 @@ non-empty justification) are kept and still prompt for approval. This is a
 preset-level workaround — the real fix is upstream (DSH should not expose
 escalation fields to children with a fixed permission scope).
 
+### Known limits: background subagents and "early close"
+
+DSH is turn-based — a model either outputs or ends its turn, so there is no
+mechanism-level way to force it to wait for a background subagent. Some models
+close with a final conclusion while a delegated child is still running,
+claiming "done" without the child's result. The bundled `early-close-context`
+plugin mitigates this with facts: a live "currently running background
+subagents" block in the system prompt (re-rendered every turn), a "Decision
+point" reminder on every successful delegation result, and a persona clause
+against claiming completion while a child is unsettled. The model may still
+end its turn before the child settles (no force-wait), but it no longer
+misreports completion — the settle notice wakes it to integrate the result.
+
 ---
 
 ## 中文
@@ -125,6 +138,16 @@ schema 仍暴露可选的 `sandbox_permissions`/`justification` 字段；部分�
 配对、非更宽模式）；**合法升级请求（更宽模式 + 非空理由）保留，照常请求批准**。
 这是预设层的临时缓解而非根治——真正修复在上游 DSH（不应向权限固定的子代理暴露
 升级字段）。
+
+### 已知边界：后台子代理与「提前收口」
+
+DSH 是回合制——模型要么输出要么结束回合，机制层面无法强制它等待后台子代理；
+部分模型会在子代理仍在运行时输出最终结论（谎称"已完成"而未整合子代理结果）。
+随预设分发的 `early-close-context` 插件用**事实供给**缓解：system prompt 每回合
+注入"当前运行中的后台子代理"块（与宿主 `sandbox:policy` 同一动态机制）、每次
+派发成功的结果附加 "Decision point" 提醒、persona 增加"子代理未 settle 前不得
+声称完成"条款。模型仍可能在子代理完成前结束回合（无强制等待），但**不再谎报
+完成**——settle 通知会唤醒主模型整合结果。
 
 **`web_fetch`（可选，见仓库 README「进阶配置」）**：`webFetch` 默认关闭，开启后
 预设会话可注册 `web_fetch` 工具（需宿主层安装 fetch provider，卡片在检测到

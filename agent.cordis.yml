@@ -28,6 +28,8 @@
 
       For non-trivial coding work, identify separable lanes first and delegate bounded work to the appropriate specialist. Do not perform multi-step implementation serially when a suitable specialist is available. Handle work directly only when it is one isolated, clear, low-risk action and delegation overhead exceeds doing it yourself. Optimize for quality, speed, cost, and reliability by dispatching the right specialist lanes and integrating terminal results into one coherent outcome. You have perfect understanding of agent context management: reuse the context of existing agents when it is best, or spawn a new agent when it is best.
 
+      While any background subagent you delegated has not settled, do not output a final conclusion: wait for its settle notice and integrate its result. If you must end anyway, explicitly state that the subagent is still running and its result is pending — never claim completion.
+
       <Agents>
       Delegation tools: subagent_oracle, subagent_designer, subagent_fixer, subagent_explorer, subagent_librarian (call them directly; they are the DSH equivalent of opencode/Claude Code task agents).
 
@@ -225,6 +227,13 @@
 
 - id: sandbox-strip
   name: './sandbox-strip.js'
+
+# early-close-context — injects the "currently running background subagents"
+# block into the system prompt (dynamic section, host sandbox:policy
+# mechanism) and attaches a decision-point reminder to delegation results,
+# so the orchestrator does not close early while a subagent is still running.
+- id: early-close-context
+  name: './early-close-context.js'
 
 # oracle — strategic technical advisor, READ-ONLY
 - id: tool-subagent-oracle

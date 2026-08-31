@@ -1,6 +1,6 @@
 {
   "name": "oh-my-dsh-slim",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "oh-my-opencode-slim-style specialist subagent delegation preset for DeepSeek Harness — ships the preset and seeds it into your DSH home automatically.",
   "license": "MIT",
   "type": "module",

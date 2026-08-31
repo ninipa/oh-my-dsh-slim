@@ -226,6 +226,17 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
   preset never load the plugin, so their behavior is unchanged. This is a preset-level workaround,
   not a fix: the real fix is upstream — DSH should stop exposing escalation fields to children whose
   permission scope is fixed
+- **Background subagents and "early close" (`early-close-context` plugin)**: DSH is turn-based —
+  a model either outputs or ends its turn; there is no mechanism-level way to force it to wait for a
+  background subagent. Some models therefore close with a final conclusion while a delegated child
+  is still running, claiming "done" without the child's result. The bundled `early-close-context`
+  plugin mitigates this by supplying the model with facts: a live "currently running background
+  subagents" block in the system prompt (re-rendered every turn, same mechanism as the host's
+  `sandbox:policy`), a "Decision point" reminder attached to every successful delegation result,
+  and a persona clause against claiming completion while a child is unsettled. In practice the
+  delegation turn now reports "still running; cannot output a final conclusion yet" and waits for
+  the settle notice, which wakes the main model to integrate the result. The model may still end its
+  turn before the child settles (no force-wait), but it no longer misreports completion
 
 ## FAQ
 
