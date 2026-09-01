@@ -34,6 +34,10 @@ const valid = schema({
 check(valid.presets['my-dsh-normal'].librarian.model === 'user-model', 'valid document resolves');
 check(valid.advanced.roles.librarian.maxTokens === 12345, 'advanced role overrides resolve');
 
+const noneDoc = schema({ presets: { 'my-dsh-normal': { fixer: { effort: 'none' } } } });
+check(noneDoc.presets['my-dsh-normal'].fixer.effort === 'none',
+  'effort "none" (omit reasoningEffort for effort-less models) resolves');
+
 console.log('\n[value domains]');
 const attempts = [
   [{ presets: { x: { oracle: { effort: 'bogus' } } } }, /effort/, 'effort enum enforced'],

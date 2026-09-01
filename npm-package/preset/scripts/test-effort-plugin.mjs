@@ -134,7 +134,36 @@ console.log('\n[cold-resume]');
   else fail(`cold-resumed fallback broken: ${JSON.stringify(resolved)}`);
 }
 
-// ── six keys mutually distinct (sync guard with the matrix) ─────────────────
+// ── explicit none omits reasoningEffort while preserving temperature ─────────
+console.log('\n[none]');
+{
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const tmp = join(tmpdir(), `omds-effort-none-${Date.now()}.json`);
+  writeFileSync(tmp, JSON.stringify({ preset: 'p', presets: { p: { fixer: { effort: 'none' } } } }));
+  const prev = process.env.OH_MY_DSH_SLIM_CONFIG;
+  process.env.OH_MY_DSH_SLIM_CONFIG = tmp;
+  try {
+    const ctx = makeCtx();
+    apply(ctx);
+    const resolved = await requestThrough(
+      ctx,
+      { model: 'local-llama', maxTokens: 33333, dshRoleId: 'fixer', subagentDepth: 1 },
+      { provider: 'local', model: 'local-llama' },
+    );
+    if (resolved.temperature === 0.2 && !('reasoningEffort' in resolved)) {
+      pass('none omits reasoningEffort and keeps role temperature');
+    } else {
+      fail(`none mode broken: ${JSON.stringify({ effort: resolved.reasoningEffort, temperature: resolved.temperature })}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.OH_MY_DSH_SLIM_CONFIG;
+    else process.env.OH_MY_DSH_SLIM_CONFIG = prev;
+    rmSync(tmp, { force: true });
+  }
+}
+
 // (The matrix-key uniqueness and table coverage checks live in t0-validate.mjs
 // section [3]; no duplication here.)
 

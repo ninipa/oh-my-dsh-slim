@@ -17,7 +17,7 @@ window.__ModuleLoader__.load({
 
     const NS = 'oh-my-dsh-slim';
     const ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
-    const EFFORTS = ['off', 'low', 'medium', 'high', 'max'];
+    const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'max'];
     // Fields the card manages on the preset layer (inherit-or-override vs the
     // base) and on the advanced layer (user-only; no shipped default).
     const PRESET_FIELDS = ['enabled', 'provider', 'model', 'effort'];
@@ -41,7 +41,8 @@ window.__ModuleLoader__.load({
       webFetchProviderUnknown: '无法检测 provider 状态，开启前请确认已安装 provider。',
       enabled: '启用',
       model: '模型',
-      effort: '思考档',
+      effort: '思考强度',
+      effortNoneHint: '不向模型传递 reasoningEffort 参数，适用于不支持思考强度的模型。',
       advanced: '高级',
       advancedWarn: '非必要不要修改默认值，可能改变插件行为。',
       maxTokens: 'token 上限',
@@ -54,7 +55,7 @@ window.__ModuleLoader__.load({
       reset: '恢复默认',
       resetConfirm: '确认恢复默认？',
       resetDone: '已恢复默认',
-      effectiveHint: '思考档与温度对当前会话立即生效；模型、token 上限与角色启停从新会话开始生效。',
+      effectiveHint: '思考强度与温度对当前会话立即生效；模型、token 上限与角色启停从新会话开始生效。',
       readOnly: '当前连接只读，无法在此修改配置。',
       modelsLoading: '模型目录加载中…',
       modelsEmpty: '未发现可用模型：请先在 设置-模型 导入 provider。',
@@ -64,7 +65,7 @@ window.__ModuleLoader__.load({
       invalidTemperature: '需在 0–2 之间',
       roleOracle: '架构 / 攻坚 / 代码审查（只读）',
       roleDesigner: 'UI/UX 与视觉实现（可写）',
-      roleFixer: '定向修复（可写）',
+      roleFixer: '代码实现、修复与重构（可写）',
       roleExplorer: '代码库扫描与调研（只读）',
       roleLibrarian: '外部文档检索（context7 / gh_grep）',
       roleObserver: '视觉分析（本版锁定）',
@@ -80,7 +81,8 @@ window.__ModuleLoader__.load({
       webFetchProviderUnknown: 'Provider status unavailable; confirm a provider is installed before enabling.',
       enabled: 'Enabled',
       model: 'Model',
-      effort: 'Effort',
+      effort: 'Reasoning effort',
+      effortNoneHint: 'Does not send reasoningEffort; use this for models that do not support effort control.',
       advanced: 'Advanced',
       advancedWarn: 'Avoid changing these defaults; they can alter plugin behavior.',
       maxTokens: 'Max tokens',
@@ -103,7 +105,7 @@ window.__ModuleLoader__.load({
       invalidTemperature: 'Must be between 0 and 2',
       roleOracle: 'Architecture / hard problems / code review (read-only)',
       roleDesigner: 'UI/UX and visual implementation (writable)',
-      roleFixer: 'Targeted fixes (writable)',
+      roleFixer: 'Code implementation, fixes, and refactoring (writable)',
       roleExplorer: 'Codebase scan and research (read-only)',
       roleLibrarian: 'External docs (context7 / gh_grep)',
       roleObserver: 'Vision analysis (locked this release)',
@@ -298,11 +300,10 @@ window.__ModuleLoader__.load({
             }),
           ),
           React.createElement('select', {
-            value: role.effort ?? '', disabled: locked,
+            value: role.effort ?? '', disabled: locked, 'aria-label': t('effort'),
             onChange: (e) => onChange(roleId, { effort: e.target.value === '' ? undefined : e.target.value }),
             style: { ...controlStyle, width: 120, flex: 'none' },
           },
-            React.createElement('option', { value: '' }, t('effort')),
             EFFORTS.map((level) => React.createElement('option', { key: level, value: level }, level)),
           ),
           React.createElement('button', {
@@ -311,6 +312,7 @@ window.__ModuleLoader__.load({
             style: { background: 'none', border: 'none', cursor: 'pointer', color: color.tertiary, padding: 4, flex: 'none' },
           }, React.createElement(ui.IconChevronDownOutline14, { size: 14, style: { transform: advOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s' } })),
         ),
+        role.effort === 'none' ? React.createElement('div', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('effortNoneHint')) : null,
         locked ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12 } },
           React.createElement(ui.IconWarningOutline16, { size: 14 }), t('observerLocked')) : null,
         advOpen ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, borderTop: `1px solid ${color.border}`, paddingTop: 8 } },
@@ -479,7 +481,7 @@ window.__ModuleLoader__.load({
         React.createElement('div', { style: { display: 'flex', gap: 6, fontSize: 12, color: color.secondary, background: color.hover, borderRadius: 8, padding: '6px 8px' } },
           t('orchestratorNote')),
         React.createElement('div', { style: { border: `1px solid ${color.border}`, borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 } },
-          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 } },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 10, minWidth: 0 } },
             React.createElement(Switch, {
               checked: current.webFetch === true,
               disabled: provider.status === 'missing',

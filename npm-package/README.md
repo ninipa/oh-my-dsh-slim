@@ -51,6 +51,10 @@ and temperature apply immediately (next delegation); role toggles, `webFetch`
 and tool permissions take effect after restarting DSH. See the
 [repo README](https://github.com/ninipa/oh-my-dsh-slim#configuration).
 
+Effort values: `none | off | low | medium | high | max` — `none` omits the
+`reasoningEffort` parameter entirely (for models that do not support effort
+control, e.g. local LLMs); `off` explicitly disables reasoning.
+
 ### web_fetch (optional, see repo README "Advanced configuration")
 
 `webFetch` (off by default) registers the `web_fetch` tool for preset sessions
@@ -127,10 +131,12 @@ dsh plugin --profile web add oh-my-dsh-slim
 ### 自定义
 
 预设目录是托管内容，请勿直接手改——所有自定义走**设置卡片**（设置 → 插件配置 →
-oh-my-dsh-slim：角色开关/模型/思考档、高级 maxTokens/temperature、以及 `webFetch`
+oh-my-dsh-slim：角色开关/模型/思考强度、高级 maxTokens/temperature、以及 `webFetch`
 开关）或旧版 `$DSH_HOME/oh-my-dsh-slim.json`（无设置服务时），升级永不触碰。
-模型/思考档/温度改完立即生效（下一次委派）；角色开关、`webFetch` 与工具权限需重启
-DSH 生效。完整功能说明、配置指南与验收清单见
+模型/思考强度/温度改完立即生效（下一次委派）；角色开关、`webFetch` 与工具权限需重启
+DSH 生效。思考强度取值 `none | off | low | medium | high | max`——`none` 表示完全不发送
+`reasoningEffort` 参数（适用于不支持思考强度的模型，如本地 LLM）；`off` 表示明确关闭推理。
+完整功能说明、配置指南与验收清单见
 [仓库 README](https://github.com/ninipa/oh-my-dsh-slim#readme)。
 
 ### 已知边界：委派子代理无法升级沙箱权限

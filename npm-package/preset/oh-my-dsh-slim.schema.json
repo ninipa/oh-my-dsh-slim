@@ -30,7 +30,7 @@
         "enabled": { "type": "boolean", "description": "Mount this role's tool (default true). observer is force-disabled in this preset version and ignores enabled:true." },
         "provider": { "type": "string" },
         "model": { "type": "string" },
-        "effort": { "enum": ["off", "low", "medium", "high", "max"] },
+        "effort": { "enum": ["none", "off", "low", "medium", "high", "max"] },
         "tools": { "type": "array", "items": { "type": "string" } },
         "deny": { "type": "array", "items": { "type": "string" } },
         "mcps": { "type": "array", "items": { "type": "string" } },

@@ -4,6 +4,40 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.3.4] — 2026-09-01
+
+### Added
+
+- **`effort: "none"` — per-role opt-out of the `reasoningEffort` parameter**
+  (settings card + schema + runtime). Local LLMs (e.g. Llama/Qwen served
+  without a reasoning-effort field) reject `reasoningEffort` and break
+  delegation (reported as issue #2). Previously every role shipped a default
+  effort and the preset always injected it. `none` means "do not send
+  `reasoningEffort` at all" — deliberately distinct from `off`, which still
+  sends `reasoningEffort: "off"` (explicitly disabling reasoning on models
+  that support the parameter). The GUI effort select gained a `none` option
+  (first item) with an inline explanation; the settings schema, the editor
+  schema (`oh-my-dsh-slim.schema.json`) and the runtime injector
+  (`effort-by-role.js`) all accept it; `temperature` injection is unaffected.
+  Defaults are unchanged (`high`), so existing configurations behave
+  identically. Verified: runtime injection test (`none` omits
+  `reasoningEffort`, keeps role temperature), settings-schema acceptance,
+  GUI write-plan tests (set / no-op / reset), and production GUI acceptance.
+- **Fixer card description updated**: "定向修复" → "代码实现、修复与重构" /
+  "Targeted fixes" → "Code implementation, fixes, and refactoring" — the role
+  covers bounded implementation, bug fixes and refactoring, not only fixes.
+
+### Changed
+
+- Settings card wording: "思考档" → "思考强度" (reasoning effort) in zh, en
+  and the effective-effect hint; the card no longer shows a placeholder
+  option labelled "思考档" in the effort select (the select now always shows
+  a real value, `none` included).
+- Docs: effort vocabulary (incl. `none`) documented in the public/npm
+  READMEs; zh public README gained the missing "early close" known-limit
+  entry (parity with en).
+
+
 ## [0.3.3] — 2026-08-31
 
 ### Changed

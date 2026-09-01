@@ -60,6 +60,8 @@ check(card.missingPrimitives(makePrimitives({ drop: ['Button', 'Toast'] })).join
   'missingPrimitives: reports dropped components');
 check(typeof card.planUserOps === 'function' && typeof card.buildDraft === 'function',
   'pure helpers exported for tests');
+check(source.includes("const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'max'];"), 'effort options include explicit none mode');
+check(source.includes('effortNoneHint'), 'none mode carries a compatibility explanation');
 
 // ------------------------------------------------------- apply + slot wiring
 console.log('\n[apply: card registration]');
@@ -181,6 +183,29 @@ const opsFor = (user, patchRole = {}, patchAdvanced = {}) =>
 
   const both = opsFor({}, { model: 'm2', effort: 'max' }, { temperature: 0.3 });
   check(both.length === 3, `independent changes plan one op each (${both.length})`);
+
+  const noneOps = opsFor({}, { effort: 'none' });
+  check(noneOps.length === 1 && noneOps[0].op === 'set' && noneOps[0].value === 'none'
+    && noneOps[0].path.join('.') === 'presets.p.oracle.effort',
+    'effort none plans a set on the preset layer (differs from base high)');
+
+  const noneUser = { presets: { p: { oracle: { effort: 'none' } } } };
+  check(opsFor(noneUser, { effort: 'none' }).length === 0, 'effort none equal to user layer plans nothing');
+
+  const noneReset = opsFor(noneUser, {});
+  check(noneReset.length === 1 && noneReset[0].op === 'unset' && noneReset[0].path.join('.') === 'presets.p.oracle.effort',
+    'restoring base effort plans unset of the stored none override');
+
+  const wfOn = card.planUserOps(BASE, {}, card.buildDraft({ ...BASE, webFetch: true }, {}));
+  check(wfOn.length === 1 && wfOn[0].op === 'set' && wfOn[0].path.join('.') === 'webFetch' && wfOn[0].value === true,
+    'webFetch on plans a set on the namespace top level');
+
+  const wfUserOn = card.planUserOps(BASE, { webFetch: true }, card.buildDraft({ ...BASE, webFetch: true }, {}));
+  check(wfUserOn.length === 0, 'webFetch on equal to user layer plans nothing');
+
+  const wfOff = card.planUserOps(BASE, { webFetch: true }, card.buildDraft({ ...BASE, webFetch: false }, {}));
+  check(wfOff.length === 1 && wfOff[0].op === 'unset' && wfOff[0].path.join('.') === 'webFetch',
+    'webFetch off (default) plans unset of the stored override');
 }
 
 console.log('\n[buildDraft]');
@@ -195,6 +220,11 @@ console.log('\n[buildDraft]');
   check(draft.roles.oracle.enabled === false && draft.roles.oracle.model === 'y', 'preset-layer fields surfaced');
   check(draft.roles.observer.enabled === true, 'missing enabled defaults to true');
   check(draft.roles.fixer.maxTokens === 5 && draft.roles.oracle.maxTokens === undefined, 'advanced layer surfaced per role');
+
+  const wfDraft = card.buildDraft({ ...value, webFetch: true }, value.advanced);
+  check(wfDraft.webFetch === true, 'webFetch true surfaced');
+  check(card.buildDraft({ ...value, webFetch: false }, value.advanced).webFetch === false, 'webFetch false surfaced');
+  check(card.buildDraft(value, value.advanced).webFetch === false, 'missing webFetch defaults to false');
 }
 
 console.log(failures === 0 ? '\nCLIENT CARD: ALL CHECKS PASSED' : `\nCLIENT CARD: ${failures} CHECK(S) FAILED`);

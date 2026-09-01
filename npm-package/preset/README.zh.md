@@ -101,15 +101,18 @@ git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-
 
 - 可按角色覆盖 `enabled`/`model`/`effort`/`deny`/`mcps`；`temperature`/`maxTokens` 属高级键
   （`advanced.roles.<roleId>`）
+- **思考强度取值**：`effort` 支持 `none` / `off` / `low` / `medium` / `high` / `max`。
+  `none` = 完全不发送 `reasoningEffort` 参数（适用于不支持思考强度的模型，如本地 LLM）；
+  `off` = 发送 `reasoningEffort: "off"` 明确关闭推理（模型需支持该参数）
 - **模型名校验**：委派时按你在「设置-模型」导入的 provider 目录实时校验——填了不存在的模型，
   第一次委派即报错并列出全部可用模型（含 vision-capable 子集），不会静默失败
 - **observer 锁定**：`observer.enabled: true` 会被忽略并警告（原因见上）
 - 修改后**新会话生效**，运行中会话不受影响
 
 **GUI 配置卡片**（随 npm 包分发）：安装后「设置 → 插件 → 插件配置」出现卡片——每个角色的
-启用/模型/思考档可直接编辑，高级子区含 token 上限与温度（带默认值告警），模型下拉与对话输入框
+启用/模型/思考强度可直接编辑，高级子区含 token 上限与温度（带默认值告警），模型下拉与对话输入框
 选择器同源。orchestrator 仅展示说明：它是当前会话主模型，在对话输入框的选择器中更换（默认模型在
-设置-模型 维护）。保存后会提示生效语义（思考档/温度立即生效；模型/token/启停新会话生效）。
+设置-模型 维护）。保存后会提示生效语义（思考强度/温度立即生效；模型/token/启停新会话生效）。
 
 **对话式配置**（无需手编 JSON）：在会话里直接说，例如"帮我把 fixer 的模型换成 kimi-k3"或
 "关闭 oracle 角色"——主模型会按 schema 修改上述 JSON。
@@ -134,7 +137,7 @@ git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-
 
 **② 打开开关**：设置 → 插件配置 → 展开 oh-my-dsh-slim 卡片 → 打开「web_fetch 工具」→
 **保存** → **重启 DSH** 生效（webFetch 是组合层配置，与角色启停同类：变更需重启进程；
-角色模型/思考档等其余配置改完即生效，无需重启）。
+角色模型/思考强度等其余配置改完即生效，无需重启）。
 
 **收益**：搜索定位 URL 后可直接抓取目标页原文（官方文档/源码/registry 等），减少反复搜索
 拼凑片段。
@@ -193,6 +196,14 @@ DSH_HOME=<临时目录> dsh --profile headless --patch scripts/probe-patch.headl
   `WIDER_MODES` 表判定）；**合法升级请求（更宽模式 + 非空理由）保留，照常请求批准**。不使用本
   预设的会话不会加载该插件，行为零变化。这是预设层的临时缓解而非根治：真正修复在上游——DSH
   不应向权限已固定的子代理暴露升级字段
+- **后台子代理与「提前收口」（`early-close-context` 插件）**：DSH 是回合制——模型要么输出要么
+  结束回合，机制层面无法强制等待后台子代理；部分模型会在子代理仍在运行时输出最终结论（谎称
+  "已完成"而未整合子代理结果）。随预设分发的 `early-close-context` 插件用**事实供给**缓解：
+  system prompt 每回合注入"当前运行中的后台子代理"块（与宿主 `sandbox:policy` 同一动态机制）、
+  每次派发成功的结果附加 "Decision point" 提醒、persona 增加"子代理未 settle 前不得声称完成"
+  条款。0.3.3 起账本三态（running → reported → settled）：子代理的 report 被明确标注为
+  "已回报内容，等待正式完成通知（reported ≠ 完成）"，只有 finish 通知才算结算。模型仍可能在
+  子代理完成前结束回合（无强制等待），但不再谎报完成——settle 通知会唤醒主模型整合结果
 
 ## 致谢
 

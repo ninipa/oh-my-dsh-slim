@@ -19,7 +19,7 @@ const USER_CONFIG_NAME = 'oh-my-dsh-slim.json';
 export const SETTINGS_NS = 'oh-my-dsh-slim';
 const ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
 // Reasoning-effort vocabulary accepted for every role and the orchestrator.
-export const EFFORT_LEVELS = ['off', 'low', 'medium', 'high', 'max'];
+export const EFFORT_LEVELS = ['none', 'off', 'low', 'medium', 'high', 'max'];
 const RUNTIME_DEFAULTS = {
   oracle: { temperature: 0.1, maxTokens: 128000 },
   designer: { temperature: 0.7, maxTokens: 64000 },

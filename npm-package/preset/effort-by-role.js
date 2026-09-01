@@ -50,7 +50,7 @@ export function apply(ctx) {
     }
     return {
       ...resolved,
-      ...(role.effort === undefined || role.effort === resolved.reasoningEffort ? {} : { reasoningEffort: role.effort }),
+      ...(role.effort === undefined || role.effort === 'none' || role.effort === resolved.reasoningEffort ? {} : { reasoningEffort: role.effort }),
       ...(role.temperature === undefined || role.temperature === resolved.temperature ? {} : { temperature: role.temperature }),
     };
   });

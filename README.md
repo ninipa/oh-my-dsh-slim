@@ -115,6 +115,10 @@ All three channels share one document shape (schema:
 
 - Per-role overrides: `enabled` / `model` / `effort` / `deny` / `mcps`; `temperature` / `maxTokens`
   are advanced keys (`advanced.roles.<roleId>`)
+- **Effort vocabulary**: `effort` accepts `none` / `off` / `low` / `medium` / `high` / `max`.
+  `none` omits the `reasoningEffort` parameter entirely — for models that do not support effort
+  control (e.g. local LLMs without a reasoning-effort field); `off` explicitly disables reasoning
+  on models that support the parameter
 - **Model validation**: at delegation time the configured model id is checked against the
   providers you imported in **Settings → Models**. An unknown model fails loud on the first
   delegation, listing every imported model (including the vision-capable subset) — no silent
