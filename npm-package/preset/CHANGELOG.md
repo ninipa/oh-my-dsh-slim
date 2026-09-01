@@ -4,6 +4,26 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.3.5] — 2026-09-01
+
+### Fixed
+
+- **Preset could hang at load when zsh is installed (`zsh -lic "npm root -g"`
+  probe)**. All five preset plugins resolve the host DSH install by probing
+  `npm root -g`, falling back to `zsh -lic "npm root -g"`. A login+interactive
+  zsh sources the user's shell config and can hang (reported on Linux,
+  zsh 5.5.1-6.el8.2: the 极简角色委派 preset mode became unusable while
+  standard mode kept working — these probes only run inside the preset
+  plugins). `execSync` had no timeout, so a hanging zsh blocked the plugin
+  mount indefinitely. Fix: every probe is now bounded (2 s timeout, child
+  killed on expiry), silent on stderr (the `/bin/sh: zsh: 未找到命令` noise
+  when zsh is absent is gone), and the zsh fallback only runs when plain
+  `npm root -g` fails (first success wins). The same hardening applies to the
+  `command -v dsh` probe and the shipped diagnostic scripts. Verified:
+  timeout kills a hung child (ETIMEDOUT at ~2 s), T0 gained a static guard
+  (bounded probes enforced for all five plugins), full unit battery green.
+
+
 ## [0.3.4] — 2026-09-01
 
 ### Added

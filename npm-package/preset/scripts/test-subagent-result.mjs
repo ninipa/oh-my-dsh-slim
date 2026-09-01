@@ -20,11 +20,17 @@ function resolveDshPackage() {
     roots.push(join(process.env.DSH_HOME, 'profiles', 'node_modules'));
     roots.push(join(process.env.DSH_HOME, 'profiles', 'web', 'node_modules'));
   }
+  const probeOptions = { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] };
   for (const command of ['npm root -g', 'zsh -lic "npm root -g"']) {
-    try { roots.push(execSync(command, { encoding: 'utf8' }).trim()); } catch {}
+    // zsh -lic sources the user's login+interactive shell config, which can hang
+    // (reported on Linux); every probe is bounded and silent on stderr.
+    try {
+      roots.push(execSync(command, probeOptions).trim());
+      break; // first reachable npm root wins; the zsh fallback only runs when plain sh lacks npm
+    } catch {}
   }
   try {
-    const dshBin = realpathSync(execSync('command -v dsh', { encoding: 'utf8' }).trim());
+    const dshBin = realpathSync(execSync('command -v dsh', probeOptions).trim());
     roots.push(dirname(dirname(dirname(dirname(dshBin)))));
   } catch {}
   roots.push('/opt/homebrew/lib/node_modules', '/usr/local/lib/node_modules');

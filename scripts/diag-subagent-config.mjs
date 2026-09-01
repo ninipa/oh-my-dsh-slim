@@ -17,7 +17,7 @@ const expectedRoute = bundledDefaults.presets[bundledDefaults.preset].librarian;
 
 function commandOutput(command, args) {
   try {
-    return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync(command, args, { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return '';
   }

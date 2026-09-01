@@ -16,11 +16,17 @@ let YAML;
 try {
   const roots = [];
   if (process.env.DSH_HOME) roots.push(join(process.env.DSH_HOME, 'profiles', 'node_modules'));
+  const probeOptions = { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] };
   for (const command of ['npm root -g', 'zsh -lic "npm root -g"']) {
-    try { roots.push(execSync(command, { encoding: 'utf8' }).trim()); } catch {}
+    // zsh -lic sources the user's login+interactive shell config, which can hang
+    // (reported on Linux); every probe is bounded and silent on stderr.
+    try {
+      roots.push(execSync(command, probeOptions).trim());
+      break; // first reachable npm root wins; the zsh fallback only runs when plain sh lacks npm
+    } catch {}
   }
   try {
-    const dshBin = realpathSync(execSync('command -v dsh', { encoding: 'utf8' }).trim());
+    const dshBin = realpathSync(execSync('command -v dsh', probeOptions).trim());
     const packageDir = dirname(dirname(dshBin));
     roots.push(dirname(dirname(packageDir)));
   } catch {}
@@ -102,6 +108,11 @@ if (/roleFromPayload/.test(effortSrc) && !/mimo-v2\.5:\d+/.test(effortSrc)) pass
 const personaTexts = roleRows.map((row) => row.config?.persona ?? '');
 if (personaTexts.some((text) => /web_fetch/.test(text))) fail('persona exposes unavailable web_fetch'); else pass('no persona recommends web_fetch');
 if (personaTexts.every((text) => !/\b(ast_grep_search|apply_patch)\b/.test(text))) pass('personas contain only DSH tool vocabulary'); else fail('persona contains unsupported tool vocabulary');
+for (const file of ['role-subagent.js', 'subagent-result.js', 'web-fetch-gate.js', 'early-close-context.js', 'sandbox-strip.js']) {
+  const src = readFileSync(join(presetDir, file), 'utf8');
+  if (src.includes('zsh -lic') && src.includes('timeout: 2000') && src.includes("stdio: ['ignore', 'pipe', 'ignore']")) pass(`${file} bounds its shell probes`);
+  else fail(`${file} must bound execSync probes (zsh -lic can hang; timeout + silent stderr required)`);
+}
 
 console.log('\n[5] soft-disabled roles');
 const orchestratorRow = rows.find((row) => row?.id === 'persona');
