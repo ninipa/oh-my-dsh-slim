@@ -55,6 +55,21 @@ Effort values: `none | off | low | medium | high | max` — `none` omits the
 `reasoningEffort` parameter entirely (for models that do not support effort
 control, e.g. local LLMs); `off` explicitly disables reasoning.
 
+### Multiple configurations (multi-preset, 0.4.0)
+
+The card's top **Delegation configuration** dropdown manages named
+configurations, each backed by its own native agent preset (created through
+the seeder's `/omds` profile RPCs). Choosing "＋ New configuration" edits an
+in-place draft copied from what you were just editing; **Save** first asks for
+a display name only (the internal id is generated and never changes), then
+creates a real preset at
+`$DSH_HOME/.agent-presets/profile-<prefix>-<hash>/` with its own
+`profile.json` snapshot — which is how configurations stay isolated from each
+other and from the bundled one. **Set as default for new sessions** writes
+DSH's native agent-presets default setting (the same write the Agent preset
+picker does). Features need the settings channel; preset-only installs keep
+single-configuration behavior.
+
 ### web_fetch (optional, see repo README "Advanced configuration")
 
 `webFetch` (off by default) registers the `web_fetch` tool for preset sessions
@@ -138,6 +153,15 @@ DSH 生效。思考强度取值 `none | off | low | medium | high | max`——`n
 `reasoningEffort` 参数（适用于不支持思考强度的模型，如本地 LLM）；`off` 表示明确关闭推理。
 完整功能说明、配置指南与验收清单见
 [仓库 README](https://github.com/ninipa/oh-my-dsh-slim#readme)。
+
+### 多命名配置（multi-preset，0.4.0）
+
+卡片顶部「**委派配置**」下拉管理多套命名配置，每套对应一个**真实原生 Agent 预设**（由播种器
+的 `/omds` profile RPC 创建）。选「＋ 新建配置」→ 原地编辑一份复制草稿 → **首次保存只填显示
+名称**（内部 ID 自动生成、永不改变）→ 生成 `$DSH_HOME/.agent-presets/profile-<前缀>-<hash>/`
+目录 + 自带 `profile.json` 快照——多套配置互相隔离、也与内置配置隔离。**设为新会话默认**
+写入 DSH 原生 agent-presets 默认设置（与 Agent 预设页点击卡片是同一处写入）。该功能依赖
+settings 通道；仅装预设（无 npm 包）时保持单配置行为。
 
 ### 已知边界：委派子代理无法升级沙箱权限
 

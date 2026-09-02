@@ -2,17 +2,34 @@
 //
 // The preset remains usable without any user configuration: defaults.json is
 // bundled next to this module. User intent is read from, in descending
-// priority: the OH_MY_DSH_SLIM_CONFIG test channel, the host settings
-// namespace "oh-my-dsh-slim" (registered by the npm seeder; hot-updated), or
-// the legacy $DSH_HOME/oh-my-dsh-slim.json file for hosts without a settings
-// service. All sources share one shape and one merge.
+// priority: the OH_MY_DSH_SLIM_CONFIG test channel, the per-preset profile
+// snapshot (profile.json beside this module), the host settings namespace
+// "oh-my-dsh-slim" (registered by the npm seeder; hot-updated), or the legacy
+// $DSH_HOME/oh-my-dsh-slim.json file for hosts without a settings service.
+// All sources share one shape and one merge.
+//
+// Profile snapshots are how a multi-preset deployment keeps configurations
+// isolated: a custom agent preset (created by the seeder's /omds profile RPCs)
+// is a full directory copy that carries its own plugins AND its own
+// profile.json. A standing composition resolves config-loader relative to its
+// own directory, so two profiles never read each other's document and the
+// bundled preset (which ships no profile.json) keeps its original channels —
+// the settings namespace and the legacy file — untouched.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_NAME = 'oh-my-dsh-slim.json';
+// The per-preset configuration snapshot written by the /omds profile RPCs.
+// Absent = this preset runs on the bundled defaults (and the bundled preset
+// additionally consults the settings namespace / legacy JSON channels).
+const PROFILE_SNAPSHOT_NAME = 'profile.json';
+// Test channel honoring the multi-preset layout without touching the real
+// preset directory: points at the directory whose profile.json (when present)
+// is the snapshot. Unset in production, where ROOT is the preset directory.
+const PROFILE_DIR_TEST_ENV = 'OH_MY_DSH_SLIM_PROFILE_DIR';
 // The settings namespace registered (and imported from the legacy file) by the
 // npm seeder. Defined here so both the loader and the schema share one string
 // without an import cycle (settings-schema.js imports the constants below).
@@ -68,6 +85,54 @@ function userConfigPath() {
   if (process.env.OH_MY_DSH_SLIM_CONFIG) return process.env.OH_MY_DSH_SLIM_CONFIG;
   if (process.env.DSH_HOME) return join(process.env.DSH_HOME, USER_CONFIG_NAME);
   return undefined;
+}
+
+/**
+ * The profile snapshot directory this copy of the loader serves.
+ *
+ * Production resolves to this module's own directory — the preset directory a
+ * standing composition was mounted from, which is how profiles stay isolated.
+ * The test channel overrides it so tests never write into the workspace root.
+ */
+function profileSnapshotDir() {
+  return process.env[PROFILE_DIR_TEST_ENV] !== undefined && process.env[PROFILE_DIR_TEST_ENV].trim() !== ''
+    ? process.env[PROFILE_DIR_TEST_ENV]
+    : ROOT;
+}
+
+/**
+ * Read this preset's own profile snapshot, if it has one.
+ * Returns undefined for the bundled preset and for directories that ship no
+ * profile.json (they simply run on the bundled defaults).
+ */
+function readProfileSnapshot() {
+  const dir = profileSnapshotDir();
+  const path = join(dir, PROFILE_SNAPSHOT_NAME);
+  if (!existsSync(path)) return undefined;
+  return readJson(path);
+}
+
+/**
+ * Select the inner preset name and its role overrides from one user document.
+ *
+ * Accepts both shapes: the legacy document (role overrides under
+ * `presets[<preset>]`, the name in `preset`) and the compact profile document
+ * (role overrides directly under `roles`, state under `webFetch`/`advanced`/
+ * `mcpServers` at the top level). The compact keys win over the legacy map so
+ * a document that carries both stays unambiguous.
+ */
+function selectUserPreset(defaults, user) {
+  const presetName = user.preset ?? defaults.preset;
+  if (user.preset !== undefined && defaults.presets?.[presetName] === undefined && user.presets?.[presetName] === undefined) {
+    throw new Error(`oh-my-dsh-slim: unknown preset "${presetName}"`);
+  }
+  const inherited = user.presets?.[presetName] ?? {};
+  const compact = user.roles ?? {};
+  const userPreset = { ...inherited, ...compact };
+  if (userPreset.orchestrator === undefined && user.orchestrator !== undefined) {
+    userPreset.orchestrator = user.orchestrator;
+  }
+  return { presetName, userPreset };
 }
 
 function mergeRole(roleId, base, override, advanced) {
@@ -165,12 +230,21 @@ function readSettingsSection(ctx) {
 function load(ctx) {
   const defaults = readDefaults();
   const envPath = process.env.OH_MY_DSH_SLIM_CONFIG;
+  // A preset that carries its own profile snapshot has one channel only: the
+  // snapshot document (plus the bundled defaults it merges over). The global
+  // settings namespace and the legacy file belong to the bundled preset —
+  // letting a custom profile read them would leak the bundled profile's
+  // overrides into every profile and break per-profile isolation.
+  const snapshot = readProfileSnapshot();
   let user;
   let source;
   if (envPath !== undefined) {
     // Explicit test/CI channel: always a file, always wins.
     user = existsSync(envPath) ? readJson(envPath) : {};
     source = envPath;
+  } else if (snapshot !== undefined) {
+    user = snapshot;
+    source = `profile snapshot: ${join(profileSnapshotDir(), PROFILE_SNAPSHOT_NAME)}`;
   } else {
     const section = readSettingsSection(ctx);
     if (section !== undefined) {
@@ -185,12 +259,8 @@ function load(ctx) {
       source = path ?? 'bundled defaults.json';
     }
   }
-  const presetName = user.preset ?? defaults.preset;
-  if (user.preset !== undefined && defaults.presets?.[presetName] === undefined && user.presets?.[presetName] === undefined) {
-    throw new Error(`oh-my-dsh-slim: unknown preset "${presetName}"`);
-  }
+  const { presetName, userPreset } = selectUserPreset(defaults, user);
   const defaultPreset = defaults.presets?.[presetName] ?? defaults.presets?.[defaults.preset];
-  const userPreset = user.presets?.[presetName] ?? {};
   const servers = { ...(defaults.mcpServers ?? {}), ...(user.mcpServers ?? {}) };
   for (const [name, server] of Object.entries(servers)) validateServer(name, server);
   const advancedRoles = user.advanced?.roles ?? {};
@@ -202,11 +272,41 @@ function load(ctx) {
   return freeze({
     source,
     preset: presetName,
+    // The native preset id this snapshot belongs to; undefined for the
+    // bundled preset (its identity is the legacy channel, not a dir-local
+    // document). Present for custom profile snapshots.
+    profileId: snapshot === undefined ? undefined : basename(profileSnapshotDir()),
     webFetch: user.webFetch === true,
     servers: clone(servers),
     roles,
     orchestrator: { ...(defaultPreset?.orchestrator ?? {}), ...(userPreset.orchestrator ?? {}) },
   });
+}
+
+/**
+ * Validate a profile configuration document (the payload the /omds profile
+ * RPCs persist as a preset's profile.json) BEFORE it is written, so a bad
+ * save fails loudly instead of breaking the profile's sessions later.
+ * Accepts both the legacy and the compact document shapes, exactly like
+ * load() — the same validator the settings namespace applies to its channel.
+ * Throws a TypeError-compatible Error naming the offending field.
+ */
+export function validateConfigDocument(doc) {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+    throw new TypeError('profile config must be a JSON object');
+  }
+  const defaults = readDefaults();
+  const servers = { ...(defaults.mcpServers ?? {}), ...(doc.mcpServers ?? {}) };
+  for (const [name, server] of Object.entries(servers)) validateServer(name, server);
+  const { userPreset } = selectUserPreset(defaults, doc);
+  for (const roleId of ROLE_IDS) {
+    const candidate = {
+      ...(defaults.presets?.[defaults.preset]?.[roleId] ?? {}),
+      ...(userPreset?.[roleId] ?? {}),
+      ...(doc.advanced?.roles?.[roleId] ?? {}),
+    };
+    validateRole(roleId, candidate, servers);
+  }
 }
 
 function readDefaults() {
@@ -225,4 +325,4 @@ export function resetConfigForTests() {
   cachedDefaults = undefined;
 }
 
-export { ROLE_IDS, RUNTIME_DEFAULTS, TOOL_NAMES };
+export { PROFILE_SNAPSHOT_NAME, ROLE_IDS, RUNTIME_DEFAULTS, TOOL_NAMES };

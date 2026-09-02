@@ -4,6 +4,63 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.4.0] — 2026-09-02
+
+### Added
+
+- **Multiple named configurations (multi-preset)**. The settings card's top
+  row is now a **Delegation configuration** dropdown managing named
+  configurations; each configuration is a real native agent preset created
+  through the seeder's `/omds` profile RPCs (`profile-list` /
+  `profile-create` / `profile-save` / `profile-set-default`):
+  - "＋ New configuration" edits an in-place draft copied from the
+    configuration being edited; nothing is persisted until **Save**, which
+    asks for a display name only (the internal id is derived from the name and
+    never changes).
+  - A saved configuration materializes as
+    `$DSH_HOME/.agent-presets/profile-<prefix>-<hash>/` (whole-directory copy
+    of the bundled preset) plus its own `profile.json` snapshot, so
+    configurations are isolated from each other and from the bundled one; the
+    per-preset snapshot is the sole config source for that preset (verified by
+    unit tests and a real-host standing-mount smoke with two profiles).
+  - **Set as default for new sessions** writes DSH's native agent-presets
+    default setting — the same write the Agent preset picker performs, so the
+    card and the picker always agree. Only new sessions are affected.
+  - Bundle: the bundled profile (`极简角色委派`) keeps its settings-namespace
+    channel unchanged; custom profiles never read the global channels.
+  - Failure safety: a profile creation that fails validation or writing rolls
+    the copied directory back (no half-authored roster entries); saves carry
+    an `expectedRevision` fence so two concurrent writers cannot silently
+    overwrite each other.
+- **Profile RPC endpoints unit-tested end to end**
+  (`scripts/test-profile-rpc.mjs`: list/create/save/rename/set-default, plus
+  every failure path) and the card helpers/extensions covered by the client
+  card test (roster normalization, name validation, snapshot serialization,
+  RPC adapter, sentinel dropdown).
+
+### Fixed
+
+- **A profile created FROM another profile silently inherited the bundled
+  defaults except the edited field.** The create flow serialized the draft
+  against the *source profile's* effective values, so every field it inherited
+  was dropped as "no difference"; the new profile then resolved against the
+  bundled defaults (its actual base) and showed only the one edited field
+  (reported on the GUI as "saved flash-fixer, got default content"). The
+  create snapshot now serializes against the new profile's own base
+  (`bundled defaults ⊕ {}`), fixing the snapshot to the full copied
+  configuration. A regression test asserts the old baseline drops inherited
+  fields (it fails against the old code).
+- **Settings card opened on the bundled profile instead of the new-session
+  default.** The dropdown now opens on the new-session default once the roster
+  is loaded, never overriding a manual selection, and falls back to the
+  bundled profile when the roster is unavailable.
+- **The bundled profile had no "Set as default for new sessions" entry** (the
+  action was shown only for non-default custom profiles), making it impossible
+  to switch the default back; the action now appears for every non-default
+  profile (including the bundled one) but never for the new-config draft.
+- **Redundant selected-name badge** beside the dropdown removed (the dropdown
+  already shows the selection, including the "new-session default" marker).
+
 ## [0.3.5] — 2026-09-01
 
 ### Fixed

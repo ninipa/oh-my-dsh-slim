@@ -136,6 +136,28 @@ reports which changes apply immediately (effort/temperature) and which start wit
 **Conversational configuration** (no JSON editing needed): just say e.g. "change fixer's model to
 kimi-k3" or "disable the oracle role" — the orchestrator edits the JSON per the schema.
 
+**Multiple configurations (multi-preset)**: the settings card has a **Delegation configuration**
+dropdown on top (it appears when the seeder is installed — its `/omds` RPC feeds the roster). It
+manages named configurations, each backed by its own native agent preset:
+
+- The dropdown always lists **极简角色委派 / Minimal Role Delegation** (the bundled profile — the
+  new-session default until you change it) plus **＋ New configuration**. Choosing "＋ New
+  configuration" edits an **in-place draft** copied from the configuration you were just editing:
+  nothing is written until you hit **Save**, which then asks only for a **display name** (the
+  internal id is generated from the name and never changes afterwards).
+- **Restore defaults** resets only what you are currently editing; it never deletes a configuration
+  or clears the roster.
+- Selecting a configuration only chooses **what is edited** — the current session never switches.
+  Which configuration a NEW session uses is decided by the native **Agent preset** picker and its
+  default; the card's **Set as default for new sessions** button writes exactly that native
+  setting, so the card and the picker always agree (clicking a preset card in the picker is the
+  same write).
+- Saved configurations become real agent presets: directories under
+  `$DSH_HOME/.agent-presets/profile-<prefix>-<hash>/`, selectable in the Agent preset picker like
+  any other preset. Each profile's per-role settings are stored as its own snapshot
+  (`profile.json` beside the preset composition), which is how two profiles never leak into each
+  other.
+
 ## Advanced configuration: enabling web_fetch (optional, at your own risk)
 
 Public presets ship with `web_fetch` **off** (stock DSH bundles no fetch provider — only
@@ -246,6 +268,10 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
   the delegation turn reports "still running; cannot output a final conclusion yet", defers
   dependent work until the finish notice, and wakes to integrate the result. The model may still
   end its turn before the child settles (no force-wait), but it no longer misreports completion
+- **Custom profile presets keep the plugin versions they were copied with**: a profile is a full
+  copy of the bundled preset directory at creation time; upgrading the npm package re-seeds only
+  the bundled preset, so old profile directories keep their copied plugins until you recreate or
+  copy them again (their configuration snapshots survive — only the plugins age)
 
 ## FAQ
 
