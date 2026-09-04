@@ -117,7 +117,7 @@ function readProfileSnapshot() {
  *
  * Accepts both shapes: the legacy document (role overrides under
  * `presets[<preset>]`, the name in `preset`) and the compact profile document
- * (role overrides directly under `roles`, state under `webFetch`/`advanced`/
+ * (role overrides directly under `roles`, state under `advanced`/
  * `mcpServers` at the top level). The compact keys win over the legacy map so
  * a document that carries both stays unambiguous.
  */
@@ -199,7 +199,6 @@ function validateRole(roleId, role, servers) {
   if (role.deny !== undefined && (!Array.isArray(role.deny) || role.deny.some((name) => !TOOL_NAMES.has(name)))) {
     throw new Error(`oh-my-dsh-slim: ${roleId}.deny contains an unknown global tool`);
   }
-  if (role.tools?.includes('web_fetch')) throw new Error(`oh-my-dsh-slim: ${roleId}.tools must not include web_fetch`);
   if (role.mcps !== undefined && (!Array.isArray(role.mcps) || role.mcps.some((name) => typeof name !== 'string' || !servers[name]))) {
     throw new Error(`oh-my-dsh-slim: ${roleId}.mcps references an unknown MCP server`);
   }
@@ -215,7 +214,7 @@ function readSettingsSection(ctx) {
   if (typeof settings?.get === 'function') {
     const resolved = settings.get(SETTINGS_NS);
     if (resolved !== undefined) return resolved;
-    // Preset-scope plugins (role-subagent, effort-by-role, web-fetch-gate)
+    // Preset-scope plugins (role-subagent, effort-by-role)
     // resolve a settings instance from the standing scope whose registrations
     // live on the host plane — get() sees no namespace there, but the raw
     // published document is reachable. It is schema-validated at write time
@@ -276,7 +275,6 @@ function load(ctx) {
     // bundled preset (its identity is the legacy channel, not a dir-local
     // document). Present for custom profile snapshots.
     profileId: snapshot === undefined ? undefined : basename(profileSnapshotDir()),
-    webFetch: user.webFetch === true,
     servers: clone(servers),
     roles,
     orchestrator: { ...(defaultPreset?.orchestrator ?? {}), ...(userPreset.orchestrator ?? {}) },

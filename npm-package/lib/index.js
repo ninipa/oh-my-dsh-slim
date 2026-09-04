@@ -49,6 +49,7 @@ import { fileURLToPath } from 'node:url';
 
 import { SETTINGS_NS, buildSettingsSchema } from '../preset/settings-schema.js';
 import { validateConfigDocument } from '../preset/config-loader.js';
+import { MIN_HOST_VERSION, compareSemver, detectHostDshVersion } from '../preset/host-version.js';
 
 export const name = 'omds-preset-seeder';
 
@@ -434,11 +435,8 @@ async function wireSettings(ctx, log) {
 // The /omds RPC owns profile authoring because the browser must never write a
 // native preset directory itself. A serialized queue closes the check/copy
 // race for two simultaneous first-save requests with the same display name.
-// The settings service is resolved via a nested inject and is used by
-// profile-set-default only: hosts without one must keep provider-status and
-// profile create/list/save working.
 function wireOmdsRpc(ctx, log) {
-  ctx.inject(['connection', 'web', 'agentPresets'], (cctx) => {
+  ctx.inject(['connection', 'agentPresets'], (cctx) => {
     let createQueue = Promise.resolve();
     let settings;
     ctx.inject(['settings'], (sctx) => { settings = sctx.settings; });
@@ -455,11 +453,6 @@ function wireOmdsRpc(ctx, log) {
     try {
       cctx.connection.rpc.handle('/omds', async (endpoint, payload = {}, _signal) => {
         try {
-          if (endpoint === 'provider-status') {
-            const providers = cctx.web?.fetchProviders;
-            const providerIds = providers === undefined ? [] : [...providers.keys()];
-            return { ok: true, value: { installed: providerIds.length > 0, providerIds } };
-          }
           if (endpoint === 'profile-list') {
             return { ok: true, value: await endpoints.list() };
           }
@@ -484,13 +477,59 @@ function wireOmdsRpc(ctx, log) {
   });
 }
 
-export function apply(ctx) {
+// Old-host compatibility notice: when the running DSH predates this
+// release's floor, the seeder must stay fully inert (no seeding, no /omds —
+// the native authoring API does not exist there) but the user's existing
+// preset and its settings channel keep working. The only user-visible
+// surface we still own is a dedicated settings page that states the
+// situation and the fix — never the boot log alone.
+async function wireCompatNotice(ctx, log, hostVersion) {
+  let z;
+  try {
+    z = (await import('@deepseek-ai/schemastery')).default;
+  } catch (error) {
+    log.info(`omds-preset-seeder: @deepseek-ai/schemastery unavailable (${error?.message ?? error}); compatibility notice page skipped`);
+    return;
+  }
+  ctx.inject(['settings'], (sctx) => {
+    try {
+      const banner = z.object({}).description(
+        `oh-my-dsh-slim v${bundledVersion} requires DSH >= ${MIN_HOST_VERSION} ` +
+        `(this host: DSH ${hostVersion}). The plugin did NOT touch your preset ` +
+        'directory — your existing oh-my-dsh-slim preset stays usable as-is. ' +
+        'Fix: upgrade DSH to 0.1.2-rc.1 or newer, or install oh-my-dsh-slim@0.4.0.',
+      );
+      sctx.settings.register('oh-my-dsh-slim-compat', banner, { base: {} });
+      log.warn('omds-preset-seeder: compatibility notice page registered (Settings → Plugins → oh-my-dsh-slim-compat)');
+    } catch (error) {
+      log.warn(`omds-preset-seeder: compatibility notice page registration failed: ${error?.message ?? String(error)}`);
+    }
+  });
+}
+
+export function apply(ctx, options = {}) {
   const log = {
     info: (message) => ctx.logger?.info?.(message),
     warn: (message) => ctx.logger?.warn?.(message),
     error: (message) => ctx.logger?.error?.(message),
   };
+  // Host compatibility gate (0.1.2 changed the APIs this release needs).
+  // Undetectable version fails open — an unusual layout is not proof of an
+  // old host, and guessing would break valid setups. In degraded mode:
+  // seeding and the /omds RPC stay off, the existing preset directory is
+  // never touched, and the settings namespace still registers so a bundled
+  // 0.4.0 preset keeps its configuration channel.
+  const hostVersion = options.hostVersion ?? detectHostDshVersion();
+  const hostTooOld = hostVersion !== undefined && compareSemver(hostVersion, MIN_HOST_VERSION) < 0;
+  if (hostTooOld) {
+    log.warn(
+      `omds-preset-seeder: oh-my-dsh-slim v${bundledVersion} requires DSH >= ${MIN_HOST_VERSION} ` +
+      `(this host: DSH ${hostVersion}). Your preset directory was left untouched and stays ` +
+      'usable as-is. Fix: upgrade DSH to 0.1.2-rc.1 or newer, or install oh-my-dsh-slim@0.4.0.',
+    );
+  }
   try {
+    if (hostTooOld) return;
     const target = join(resolveHome(), '.agent-presets', PRESET_DIR_NAME);
 
     if (!existsSync(target)) {
@@ -530,10 +569,12 @@ export function apply(ctx) {
   } finally {
     // finally, not fall-through: every seeding branch above exits apply with
     // an early return, and the settings namespace must register on ALL of
-    // them (found by the seeder unit test's fresh-install scenario).
+    // them (found by the seeder unit test's fresh-install scenario) — also in
+    // degraded mode, where the bundled 0.4.0 preset still reads this channel.
     wireSettings(ctx, log).catch((error) => {
       log.warn(`omds-preset-seeder: settings namespace unavailable (${error?.message ?? error}); legacy JSON channel stays active`);
     });
-    wireOmdsRpc(ctx, log);
+    if (hostTooOld) wireCompatNotice(ctx, log, hostVersion);
+    else wireOmdsRpc(ctx, log);
   }
 }

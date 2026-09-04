@@ -4,6 +4,64 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.5.0] — 2026-09-04
+
+> **Requires DSH 0.1.2-rc.1 or newer.** DSH changed substantially in 0.1.2; this release is
+> **not compatible with older DSH versions** — on DSH 0.1.1 or below, stay on 0.4.0.
+> **Upgrading requires a DSH restart** (plugin code mounts once per host process).
+
+### Changed
+
+- **Target DSH 0.1.2**: adapt to the removal of `registerContinuableSetup` (agent/created
+  observer rework), retire the preset's own `web_fetch` layer and the `web-fetch-gate` plugin
+  (the host ships `web_fetch` with SSRF protection since 0.1.2), and read the settings card's
+  model list from the host's remote model catalog
+- **Delegation discipline tightened from real-session observations** (multi-model GUI runs):
+  delegation ownership rule (`self-first`/`delegate-first`, no overlapping re-work inside a
+  running lane's scope), foreground runs only on explicit user request, end the turn with a
+  brief status note after dispatching background lanes, treat interim reports as "not settled"
+- **Delegation lifecycle driven by live host events**: the early-close ledger is updated
+  synchronously from `agent/inbox/inserted` (host vocabulary `agent-message` relay vs
+  `subagent-settled` notice) with settled-child tombstones; the render scan remains only for
+  cold recovery
+- **Orchestrator persona aligned with oh-my-opencode-slim 2.2.18**: adds Todo continuity,
+  Scope check before writing (compare running-lane scopes before dispatching writers or editing
+  locally; interrupt is not rollback; a cancelled generation does not cancel required
+  validation), a Delegation contract (every delegation names a validation owner and scope),
+  a Verify step (reconcile all writer lanes before final validation; reuse still-valid
+  evidence), and a Communication section (clarity over assumptions, concise execution,
+  no flattery, honest pushback)
+- **"Decision point" reminder rewritten**: after dispatching, end the turn with a brief status
+  note; keep the turn only to dispatch further independent lanes — never redo the delegated
+  scope
+- **`run_in_background` parameter schema aligned with the strict foreground rule**: the host
+  stock wording ("Set false when your next action depends on it") intermittently pulled models
+  into foreground runs against the discipline; the schema now repeats the strict rule and is
+  guarded by unit tests. Note: plugin code changes require a **DSH restart** to take effect
+- **Effort dropdown scoped to the selected model's declared reasoning efforts** (from the host
+  model catalog): unsupported levels are hidden, explicit mismatches warn inline and block save
+  (the DeepSeek adapter accepts `off/low/high/max`; `medium` is rejected upstream)
+- **GUI-TEST-TASKS.md rewritten as a user-facing self-test list** (T1–T7: routing, scheduling
+  and integration scenarios with prompts and expected behavior; T3 uses the bundled
+  `examples/omo-probe-baseline`)
+
+### Added
+
+- **Old-host compatibility guards** (0.5.0-14): the npm package declares `engines.dsh` and
+  optional lockstep `peerDependencies` on every touched `@deepseek-ai/dsh-*` package (the
+  marketplace and dsh-market render these as the plugin's DSH requirement and can filter
+  mismatches); the seeder detects the running DSH version and, below the floor, stays fully
+  inert — it never touches an existing preset directory, keeps the settings channel alive, and
+  registers a compatibility notice page under Settings → Plugins; the preset plugins fail fast
+  with a readable error instead of mounting half-working on old hosts
+- **Host-contract probe battery** (`scripts/run-host-probes.mjs`): 8 probes / 9 phases against
+  a real DSH 0.1.2 host with the real preset mounted — zero model calls, no credentials;
+  the standing smoke after every DSH upgrade (see `scripts/TEST-INVENTORY.md` for the pinned
+  host facts)
+- New unit suites: settings schema, sandbox-strip helpers, early-close ledger state machine,
+  preset seeder state machine, `/omds` profile RPC endpoints, and the settings-card client
+  bundle (including the per-model effort regression)
+
 ## [0.4.0] — 2026-09-02
 
 ### Added

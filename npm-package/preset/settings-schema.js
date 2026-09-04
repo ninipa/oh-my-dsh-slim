@@ -38,7 +38,6 @@ export function buildSettingsSchema(z) {
     });
   return z.object({
     preset: z.string().description('Which named preset in `presets` to use'),
-    webFetch: z.boolean().description('Register the web_fetch tool for preset sessions (requires the web-fetch-http provider; see README "进阶配置")'),
     presets: z.dict(presetShape()).description('Role overrides keyed by preset name'),
     mcpServers: z.dict(
       z.object({

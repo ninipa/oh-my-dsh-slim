@@ -16,19 +16,18 @@
 //
 // A light ledger (childId -> {role,label,parentId,status}) feeds both. Status
 // is three-state, mirroring the host's own delivery vocabulary
-// (dsh-subagent: `subagent-report` relay vs `subagent-settled` notice):
+// (dsh-subagent: `agent-message` relay vs `subagent-settled` notice):
 //   running  — started, nothing reported back yet;
-//   reported — the child relayed content ("Background subagent X reported:"),
+//   reported — the child relayed content ("Agent ... sent a message:"),
 //              but a report neither concludes its turn nor changes its
 //              Activation lifetime — it may keep working, and only its
 //              finish notice (unconditional for every established child,
 //              incl. failure/cancel/token-ceiling paths) settles it;
 //   settled  — finish notice seen (or listChildren no longer reports the
 //              child running — the fallback that also covers a lost notice).
-// The ledger is updated from two sources: delegation tool results
-// (post-execute, sync) and an incremental scan of the parent session's
-// inbox-splice events (async, on render; source.kind is authoritative, no
-// text matching). listChildren refresh stays as the settle fallback.
+// The ledger is updated synchronously from child inbox insertion events, with
+// session-event replay retained for cold recovery. listChildren refresh stays
+// a settle fallback and never reopens a settled child.
 //
 // Scope: preset-only composition (like sandbox-strip); non-preset sessions
 // never load it. In-process continuation provider required (listChildren).
@@ -40,6 +39,7 @@ import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { assertHostCompatible } from './host-version.js';
 
 function resolveDshPackage() {
   const roots = [];
@@ -72,6 +72,9 @@ const require = createRequire(resolveDshPackage());
 
 const { createUserMessage } = require('@deepseek-ai/dsh-llm');
 
+
+// Host compatibility gate: one throw here aborts the whole preset mount (fail-fast).
+assertHostCompatible();
 export const name = 'early-close-context';
 export const inject = ['systemPrompt', 'subagents'];
 
@@ -87,17 +90,22 @@ export const STATUS_REPORTED = 'reported';
 
 /**
 * Classify one inbox-splice message source as a child delivery.
-* The host's own vocabulary (dsh-subagent lib):
-*   - {kind: 'subagent-report', senderSessionId} — relayed content; the child
-*     keeps running (report does not conclude its turn or change lifetime);
-*   - {kind: 'subagent-settled', senderSessionId} — unconditional finish
-*     notice (completed/failed/cancelled/token-ceiling all deliver one).
+ * The host's own vocabulary (dsh-subagent lib):
+ *   - {kind: 'agent-message', form: 'relay', senderSessionId} — relayed
+ *     content; the child keeps running (report does not conclude its turn or
+ *     change its lifetime);
+ *   - {kind: 'subagent-report', form: 'relay', senderSessionId} — legacy
+ *     compatibility spelling for the same relay;
+ *   - {kind: 'subagent-settled', form: 'notice', senderSessionId} —
+ *     unconditional finish notice (completed/failed/cancelled/token-ceiling
+ *     all deliver one).
 * @param source - a message source object.
 * @returns 'report' | 'settled' | undefined.
 */
 export function classifyDeliverySource(source) {
   if (typeof source !== 'object' || source === null) return void 0;
-  if (source.kind === 'subagent-report' && typeof source.senderSessionId === 'string') return 'report';
+  if ((source.kind === 'agent-message' || source.kind === 'subagent-report')
+    && typeof source.senderSessionId === 'string') return 'report';
   if (source.kind === 'subagent-settled' && typeof source.senderSessionId === 'string') return 'settled';
   return void 0;
 }
@@ -190,6 +198,12 @@ export function isDelegationTool(name) {
 export function apply(ctx, config) {
   /** childId -> { role, label, parentId, since, sinceLabel, childId, status } */
   const ledger = new Map();
+  /** Parent ids that have started a delegation in this composition. */
+  const trackedParents = new Set();
+  /** Delivery events that arrived before the delegation result registered its child. */
+  const pendingDeliveries = new Map(); // parentId -> Map(childId -> kind)
+  /** Settled child ids are tombstoned so late async work cannot reopen them. */
+  const settledChildren = new Map(); // parentId -> Set(childId)
   /** Pending delegation calls awaiting their tool result (WeakMap on exec). */
   const pending = new WeakMap();
   /** Per-parent last scanned session seq (incremental inbox-splice scan). */
@@ -198,7 +212,69 @@ export function apply(ctx, config) {
   const lastRefreshAt = new Map(); // parentId -> timestamp
   const REFRESH_MIN_INTERVAL_MS = 800;
 
-  /** Incremental scan: apply child deliveries from inbox-splice events. */
+  function childSet(map, parentId) {
+    let set = map.get(parentId);
+    if (set === void 0) {
+      set = new Set();
+      map.set(parentId, set);
+    }
+    return set;
+  }
+
+  function pendingMap(parentId) {
+    let map = pendingDeliveries.get(parentId);
+    if (map === void 0) {
+      map = new Map();
+      pendingDeliveries.set(parentId, map);
+    }
+    return map;
+  }
+
+  function isSettled(parentId, childId) {
+    return settledChildren.get(parentId)?.has(childId) === true;
+  }
+
+  function settleChild(parentId, childId) {
+    childSet(settledChildren, parentId).add(childId);
+    ledger.delete(childId);
+    pendingDeliveries.get(parentId)?.delete(childId);
+  }
+
+  /** Apply one delivery immediately, retaining it if registration has not landed yet. */
+  function applyDeliveryForParent(parentId, childId, kind) {
+    if (typeof parentId !== 'string' || typeof childId !== 'string') return;
+    if (kind === 'settled') {
+      settleChild(parentId, childId);
+      return;
+    }
+    if (kind !== 'report' || isSettled(parentId, childId)) return;
+    const entry = ledger.get(childId);
+    if (entry !== void 0 && entry.parentId !== parentId) return;
+    if (entry === void 0) {
+      pendingMap(parentId).set(childId, kind);
+      return;
+    }
+    applyDelivery(entry, kind);
+  }
+
+  function consumePendingDelivery(parentId, childId) {
+    const map = pendingDeliveries.get(parentId);
+    const kind = map?.get(childId);
+    map?.delete(childId);
+    if (map?.size === 0) pendingDeliveries.delete(parentId);
+    return kind;
+  }
+
+  /** Apply a delivery from the live inbox event before the next prompt assembly. */
+  ctx.on('agent/inbox/inserted', ({ agent, message }) => {
+    const parentId = agent?.id;
+    if (typeof parentId !== 'string' || !trackedParents.has(parentId)) return;
+    const kind = classifyDeliverySource(message?.source);
+    if (kind === void 0) return;
+    applyDeliveryForParent(parentId, message.source.senderSessionId, kind);
+  });
+
+  /** Incremental replay: recover deliveries that happened before the live listener. */
   function scanSessionEvents(session, parentId) {
     const from = lastScanSeq.get(parentId) ?? 0;
     let last = from;
@@ -208,13 +284,7 @@ export function apply(ctx, config) {
       if (seq > last) last = seq;
       if (event.type !== 'agent/inbox/spliced') continue;
       for (const { childId, kind } of deliveriesOf(event)) {
-        const entry = ledger.get(childId);
-        if (entry === void 0 || entry.parentId !== parentId) continue;
-        if (kind === 'settled') {
-          ledger.delete(childId);
-        } else {
-          applyDelivery(entry, kind);
-        }
+        applyDeliveryForParent(parentId, childId, kind);
         if (process.env.ECC_DEBUG === '1') console.error(`[ecc] delivery ${kind} for ${childId} (parent ${parentId})`);
       }
     }
@@ -225,10 +295,12 @@ export function apply(ctx, config) {
   // preset's role tools and any stock subagent tool that may be enabled).
   ctx.on('tools/pre-execute', async (exec, next) => {
     if (exec?.agent && isDelegationTool(exec.name)) {
+      const parentId = exec.agent.session?.id;
+      if (typeof parentId === 'string') trackedParents.add(parentId);
       pending.set(exec, {
         role: exec.name,
         label: typeof exec.arguments?.description === 'string' ? exec.arguments.description : exec.name,
-        parentId: exec.agent.session?.id,
+        parentId,
       });
     }
     return next();
@@ -241,15 +313,21 @@ export function apply(ctx, config) {
     if (info === void 0 || result.isError) return next();
     const childId = childIdOf(result);
     if (childId === void 0 || info.parentId === void 0) return next();
-    ledger.set(childId, {
-      role: info.role,
-      label: info.label,
-      parentId: info.parentId,
-      since: Date.now(),
-      sinceLabel: new Date().toLocaleTimeString(),
-      childId,
-      status: STATUS_RUNNING,
-    });
+    const parentId = info.parentId;
+    trackedParents.add(parentId);
+    if (!isSettled(parentId, childId)) {
+      ledger.set(childId, {
+        role: info.role,
+        label: info.label,
+        parentId,
+        since: Date.now(),
+        sinceLabel: new Date().toLocaleTimeString(),
+        childId,
+        status: STATUS_RUNNING,
+      });
+      const delivered = consumePendingDelivery(parentId, childId);
+      if (delivered !== void 0) applyDeliveryForParent(parentId, childId, delivered);
+    }
     // Waterfall decision: return it directly (next() drops arguments in the
     // cordis waterfall). additionalContexts are spliced into the agent inbox
     // for the next step, so each item must be a full message
@@ -257,7 +335,7 @@ export function apply(ctx, config) {
     return {
       kind: 'accept',
       additionalContexts: [createUserMessage({
-        content: [{ type: 'text', text: `Decision point: background ${info.role} "${info.label}" (${childId}) is now running and has NOT settled. A report from this subagent may arrive before its finish notice — treat the finish notice, not the report, as completion. Do not output a final conclusion until you receive its settle notice (or explicitly report it as still running); you may continue other work meanwhile.` }],
+        content: [{ type: 'text', text: `Decision point: background ${info.role} "${info.label}" (${childId}) is now running and has NOT settled. A report from this subagent may arrive before its finish notice — treat the finish notice, not the report, as completion. Do not output a final conclusion until you receive its settle notice (or explicitly report it as still running). After dispatching, end your turn with a brief status note; keep this turn only to dispatch further independent lanes — do not redo the delegated scope yourself.` }],
         source: { kind: 'plugin', plugin: 'early-close-context' },
       })],
     };
@@ -265,6 +343,8 @@ export function apply(ctx, config) {
 
   // Lazy async ledger refresh: keep only children the host still reports
   // running (the settle fallback — covers a lost/dropped finish notice).
+  // The result is allowed to remove a child, but it cannot reopen a child that
+  // the synchronous inbox path has already settled.
   async function refreshLedger(parentId) {
     const now = Date.now();
     const last = lastRefreshAt.get(parentId) ?? 0;
@@ -278,7 +358,8 @@ export function apply(ctx, config) {
         .map((row) => row.id));
       for (const childId of [...ledger.keys()]) {
         const entry = ledger.get(childId);
-        if (entry !== void 0 && entry.parentId === parentId && !running.has(childId)) ledger.delete(childId);
+        if (entry === void 0 || entry.parentId !== parentId || isSettled(parentId, childId)) continue;
+        if (!running.has(childId)) settleChild(parentId, childId);
       }
     } catch (error) {
       const msg = `early-close-context: listChildren refresh failed: ${error instanceof Error ? error.message : String(error)}`;

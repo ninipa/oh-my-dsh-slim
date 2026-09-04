@@ -22,6 +22,10 @@ import { execSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { loadConfig } from './config-loader.js';
+import { assertHostCompatible } from './host-version.js';
+
+// Host compatibility gate: one throw here aborts the whole preset mount (fail-fast).
+assertHostCompatible();
 
 function resolveDshPackage() {
   const roots = [];
@@ -217,22 +221,28 @@ function roleMarker(roleId) {
   return `oh-my-dsh-slim-role:${roleId}`;
 }
 
-function childHasRole(childCtx, roleId) {
-  if (childCtx.agent?.options?.dshRoleId === roleId) return true;
-  const events = childCtx.agent?.session?.events ?? [];
+function childHasRole(agent, roleId) {
+  if (agent?.options?.dshRoleId === roleId) return true;
+  const events = agent?.session?.events ?? [];
   return events.some((event) => event.type === 'subagent/descriptor'
     && typeof event.data?.persona === 'string'
     && event.data.persona.includes(roleMarker(roleId)));
 }
 
-function installScopedMcp(childCtx, roleId, roleConfig, servers) {
-  if (!childHasRole(childCtx, roleId)) return () => {};
-  const fibers = [];
+function installScopedMcp(childCtx, agent, roleId, roleConfig, servers) {
+  if (!childHasRole(agent, roleId)) return () => {};
+  // Serialize the per-server installs instead of mounting them concurrently:
+  // two mcp-client instances racing their tool swaps on one ctx (0.1.2-rc)
+  // lose the slower server's tools with no error or log. Each plugin() call
+  // starts its connection synchronously; chaining awaits each fiber so the
+  // next server connects only after the previous one registered its tools.
+  let installs = Promise.resolve();
   for (const serverName of roleConfig.mcps ?? []) {
     const server = servers[serverName];
     if (server === undefined) continue;
-    fibers.push(childCtx.plugin(mcpClient, { ...server, serverName }));
+    installs = installs.then(() => childCtx.plugin(mcpClient, { ...server, serverName }));
   }
+  const fibers = [installs];
   // PLAN-BACKGROUND-DELEGATION 方案2: MCP client activation is async (connect +
   // tools/list over HTTP). The first request's tool snapshot is taken inside
   // systemPrompt.assemble() BEFORE agent/pre-step fires, so waiting on pre-step
@@ -241,7 +251,11 @@ function installScopedMcp(childCtx, roleId, roleConfig, servers) {
   // inject the freshly registered mcp__* schemas into assembly.tools. On
   // timeout the round proceeds without MCP and web_search covers it.
   if (fibers.length > 0) {
-    const mcpWaitTimeoutMs = 10000;
+    // 20s cap: serialized per-server MCP installs (0.1.2-rc mcp-client race
+    // workaround) take ~7-10s end to end on this network; 10s forced frequent
+    // first-turn fallbacks. A hung (not fast-failing) server can delay the
+    // librarian's first turn by up to this cap before degrading to no-MCP.
+    const mcpWaitTimeoutMs = 20000;
     let waited = false;
     childCtx.on('system-prompt/assemble', async (assembly, context, next) => {
       if (!waited) {
@@ -386,7 +400,7 @@ function apply(ctx, config) {
     ].filter((text) => typeof text === 'string' && text.length > 0).join(' Role profile: ')
       + (backgroundEnabled
         ? continuable
-          ? ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when your next action depends on receiving the result.'
+          ? ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when the user explicitly asked to wait in place — a foreground run locks this conversation until the child returns and makes the child one-shot (no send_message follow-up, no carried context).'
           : ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
         : ' This call waits for the subagent and returns its result.')
       + (foregroundMcpNote?.description ?? '');
@@ -407,7 +421,7 @@ function apply(ctx, config) {
         ...(backgroundEnabled ? { run_in_background: {
           type: 'boolean',
           description: continuable
-            ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.'
+            ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false only when the user explicitly asked to wait in place — a foreground run locks this conversation until the child returns and makes the child one-shot (no send_message follow-up).'
             : 'Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill.',
         } } : {}),
       },
@@ -454,18 +468,25 @@ function apply(ctx, config) {
         if (!parent) throw new Error('subagent tool requires a calling agent (exec.agent was undefined)');
         await ensureModelOffered();
         const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : void 0;
+        const route = resolveDelegationRun(args, { backgroundEnabled, continuable });
         const request = {
           label: args.description,
           prompt: [{ type: 'text', text: args.prompt }],
           parent,
-          agentOptions: effectiveRoleConfig.agentOptions,
+          agentOptions: {
+            ...effectiveRoleConfig.agentOptions,
+            // Forwarded into the child's options so the standing-scope
+            // agent/created observer can tell continuable children (MCP
+            // served) from one-shot foreground runs (0.1.1 semantics).
+            dshRunMode: route.runInBackground && continuable ? 'continuable' : 'one-shot',
+          },
           persona: effectiveRoleConfig.persona,
           ...(effectiveRoleConfig.toolFilter !== void 0
             ? { toolFilter: fitFilterToKnown(knownToolNames(parent), effectiveRoleConfig.toolFilter.allow, effectiveRoleConfig.toolFilter.deny) }
             : {}),
           ...(maxDepth !== void 0 ? { maxDepth } : {}),
         };
-        if (resolveDelegationRun(args, { backgroundEnabled, continuable }).runInBackground) {
+        if (route.runInBackground) {
           if (continuable) {
             return {
               kind: 'continuable',
@@ -511,11 +532,22 @@ function apply(ctx, config) {
   if (present !== void 0) mount(present);
   else ctx.logger.info(`subagent provider "${config.provider}" not registered yet; the "${config.toolName ?? 'subagent'}" tool will register when it appears`);
   if (effectiveRoleConfig.mcps?.length > 0) {
-    const register = ctx.subagents?.registerContinuableSetup;
-    if (typeof register !== 'function') {
-      throw new Error('role-subagent: DSH does not expose registerContinuableSetup; cannot provide scoped MCP access safely');
-    }
-    register.call(ctx.subagents, (childCtx) => installScopedMcp(childCtx, config.roleId, effectiveRoleConfig, loaded.servers));
+    // DSH 0.1.2 removed the continuable child-setup seam
+    // (registerContinuableSetup, deleted together with the subagent_report
+    // tool). Per-child capabilities now attach from the standing scope by
+    // observing `agent/created` — emitted synchronously at registration,
+    // well before the child's first turn, and delivered to every enclosing
+    // scope (the child's scope binds to this standing composition). Match
+    // the role by the markers forwarded through agentOptions at delegation,
+    // then install the MCP client on the child's own ctx. Only continuable
+    // children are served: one-shot foreground runs keep 0.1.1 semantics
+    // (no MCP).
+    ctx.on('agent/created', ({ agent }) => {
+      if (agent === void 0) return;
+      if (agent.options?.dshRunMode !== 'continuable') return;
+      if (!childHasRole(agent, config.roleId)) return;
+      installScopedMcp(agent.ctx, agent, config.roleId, effectiveRoleConfig, loaded.servers);
+    });
   }
   if (backgroundEnabled && continuable) {
     ctx.systemPrompt.section({
@@ -523,7 +555,7 @@ function apply(ctx, config) {
       order: SUBAGENT_SECTION_ORDER,
       text: (context) => disposeTool === void 0 || ctx.tools.get(toolName, context.scope) === void 0
         ? ''
-        : `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. After launching background lanes, end your turn with a brief status note — do not poll their state with repeated tool calls; when a run settles, the runtime sends you a notice containing its outcome, which wakes you to reconcile it. Set \`run_in_background: false\` only when your next action depends on that subagent's result. For MCP-backed roles (subagent_librarian), foreground runs do not mount the context7/gh_grep MCP tools — keep them in the background and follow up with send_message.`,
+        : `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. After launching background lanes, end your turn with a brief status note — do not poll their state with repeated tool calls; when a run settles, the runtime sends you a notice containing its outcome, which wakes you to reconcile it. Set \`run_in_background: false\` only when the user explicitly asked to wait in place — a foreground run locks this conversation until the child returns and makes the child one-shot (no send_message follow-up, no carried context). For MCP-backed roles (subagent_librarian), foreground runs do not mount the context7/gh_grep MCP tools — keep them in the background and follow up with send_message.`,
     });
   }
   if (config.advertisement) {

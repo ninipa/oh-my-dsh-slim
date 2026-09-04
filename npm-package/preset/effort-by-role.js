@@ -5,6 +5,7 @@
 // they must never be used to infer which role is running.
 
 import { loadConfig } from './config-loader.js';
+import { assertHostCompatible } from './host-version.js';
 
 function roleFromPayload(payload) {
   const options = payload.agent?.options;
@@ -56,5 +57,8 @@ export function apply(ctx) {
   });
 }
 
+
+// Host compatibility gate: one throw here aborts the whole preset mount (fail-fast).
+assertHostCompatible();
 export const name = 'effort-by-role';
 export { inject };

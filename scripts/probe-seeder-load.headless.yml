@@ -1,0 +1,16 @@
+# Zero-cost seeder-load smoke: insert the npm host half (seeder) plus the probe
+# NOTE: run through scripts/run-host-probes.mjs (substitutes __WORKSPACE__); direct copy-paste needs the token replaced.
+# so a real `dsh --profile headless` run exercises the rewritten apply() with
+# live cordis inject wiring; the probe exits without any model request.
+- insert:
+    - id: omds-preset-seeder
+      name: file://__WORKSPACE__/npm-package/lib/index.js
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: oh-my-dsh-slim
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: probe-profile-snapshots
+      name: file://__WORKSPACE__/scripts/probe-profile-snapshots.js

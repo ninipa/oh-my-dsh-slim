@@ -30,6 +30,10 @@ import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { assertHostCompatible } from './host-version.js';
+
+// Host compatibility gate: one throw here aborts the whole preset mount (fail-fast).
+assertHostCompatible();
 
 function resolveDshPackage() {
   const roots = [];

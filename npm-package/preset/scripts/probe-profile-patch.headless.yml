@@ -1,0 +1,18 @@
+# Zero-cost multi-preset smoke overlay (HANDOFF-MULTI-PRESET):
+# NOTE: run through scripts/run-host-probes.mjs (substitutes __WORKSPACE__); direct copy-paste needs the token replaced.
+# disable the stock headless runner and replace it with probe-profile-snapshots,
+# which composes EVERY preset directory standing (a broken profile directory
+# fails here) and reads each preset's own config-loader to prove per-profile
+# snapshot isolation, then exits without ever sending a model request.
+# Run with a scratch DSH_HOME holding the bundled preset plus profile copies:
+#   DSH_HOME=<scratch> dsh --profile headless --patch scripts/probe-profile-patch.headless.yml probe
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: oh-my-dsh-slim
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: probe-profile-snapshots
+      name: file://__WORKSPACE__/scripts/probe-profile-snapshots.js

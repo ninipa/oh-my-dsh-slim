@@ -44,10 +44,10 @@ the first install).
 
 The preset directory is managed content — do not hand-edit it. Customization
 goes through the **settings card** (Settings → Plugins → Plugin configuration →
-oh-my-dsh-slim: per-role enabled/model/effort, advanced maxTokens/temperature,
-and the `webFetch` toggle) or, on hosts without the settings channel, through
+oh-my-dsh-slim: per-role enabled/model/effort, advanced maxTokens/temperature)
+or, on hosts without the settings channel, through
 `$DSH_HOME/oh-my-dsh-slim.json` — upgrades never touch either. Model, effort
-and temperature apply immediately (next delegation); role toggles, `webFetch`
+and temperature apply immediately (next delegation); role toggles
 and tool permissions take effect after restarting DSH. See the
 [repo README](https://github.com/ninipa/oh-my-dsh-slim#configuration).
 
@@ -70,13 +70,11 @@ DSH's native agent-presets default setting (the same write the Agent preset
 picker does). Features need the settings channel; preset-only installs keep
 single-configuration behavior.
 
-### web_fetch (optional, see repo README "Advanced configuration")
+### web_fetch (follows the host)
 
-`webFetch` (off by default) registers the `web_fetch` tool for preset sessions
-when a fetch provider is installed — the card disables the toggle until it
-detects `@deepseek-ai/dsh-web-fetch-http` (host-level install, see repo README).
-The provider is an SSRF primitive; do not enable in deployments that can reach
-sensitive internal targets.
+Host DSH 0.1.2+ ships `web_fetch` by default (built-in SSRF protection); preset
+sessions and delegated children inherit it directly. No fetch-provider wiring
+or `webFetch` switch ships with this preset anymore.
 
 ### Known limits: delegated children cannot escalate sandbox permissions
 
@@ -146,9 +144,9 @@ dsh plugin --profile web add oh-my-dsh-slim
 ### 自定义
 
 预设目录是托管内容，请勿直接手改——所有自定义走**设置卡片**（设置 → 插件配置 →
-oh-my-dsh-slim：角色开关/模型/思考强度、高级 maxTokens/temperature、以及 `webFetch`
-开关）或旧版 `$DSH_HOME/oh-my-dsh-slim.json`（无设置服务时），升级永不触碰。
-模型/思考强度/温度改完立即生效（下一次委派）；角色开关、`webFetch` 与工具权限需重启
+oh-my-dsh-slim：角色开关/模型/思考强度、高级 maxTokens/temperature）或旧版
+`$DSH_HOME/oh-my-dsh-slim.json`（无设置服务时），升级永不触碰。
+模型/思考强度/温度改完立即生效（下一次委派）；角色开关与工具权限需重启
 DSH 生效。思考强度取值 `none | off | low | medium | high | max`——`none` 表示完全不发送
 `reasoningEffort` 参数（适用于不支持思考强度的模型，如本地 LLM）；`off` 表示明确关闭推理。
 完整功能说明、配置指南与验收清单见
@@ -189,10 +187,9 @@ DSH 是回合制——模型要么输出要么结束回合，机制层面无法�
 才算结算，主模型不再提前数十秒宣布"子代理已完成"。模型仍可能在子代理完成前
 结束回合（无强制等待），但**不再谎报完成**——settle 通知会唤醒主模型整合结果。
 
-**`web_fetch`（可选，见仓库 README「进阶配置」）**：`webFetch` 默认关闭，开启后
-预设会话可注册 `web_fetch` 工具（需宿主层安装 fetch provider，卡片在检测到
-`@deepseek-ai/dsh-web-fetch-http` 前会禁用开关）。该 provider 是 SSRF 原语，
-可触达敏感内网的部署请勿开启。
+**`web_fetch`（跟随宿主）**：宿主 DSH ≥ 0.1.2 默认内置 `web_fetch`（自带 SSRF 防护），
+预设会话与委派子代理直接继承宿主默认；本预设不再自带 fetch provider 接线或 `webFetch`
+开关。
 
 ## License
 

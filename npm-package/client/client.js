@@ -1,6 +1,6 @@
 // oh-my-dsh-slim settings card — the browser half of the npm package.
 //
-// A hand-written ModuleLoader bundle (PLAN-CONFIG-CARD.md §2): no build chain,
+// A hand-written ModuleLoader bundle (archive/docs/PLAN-CONFIG-CARD.md §2): no build chain,
 // no JSX. React and the UI primitives are host-provided platform seeds; the
 // settings namespace is registered by the host half (lib/index.js) with the
 // shipped defaults.json as its BASE layer, so the bundled profile is edited as
@@ -28,15 +28,66 @@ window.__ModuleLoader__.load({
     const NS = 'oh-my-dsh-slim';
     const ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'max'];
+
+    // Reasoning-effort selection is MODEL-scoped: the host model catalog
+    // exposes each model's supported reasoning.efforts (adapter-authoritative
+    // — e.g. DeepSeek supports Off/Low/High/Max, no medium). Offering a fixed
+    // list regardless of model produced the flash+medium failure, and also
+    // hid host levels the preset never listed (e.g. intelalloc xhigh).
+    // 'none' (omit reasoningEffort) is always offered where a model is known:
+    // it never sends the field, so no model can reject it.
+    function findModelEntry(groups, provider, model) {
+      const group = (groups ?? []).find((entry) => entry?.id === provider);
+      return group?.models?.find((entry) => entry.id === model);
+    }
+
+    /** Effort dropdown options for one role row's selected model. */
+    function effortOptionsFor(groups, provider, model) {
+      const entry = findModelEntry(groups, provider, model);
+      if (entry === undefined) {
+        // Model unknown (catalog loading/error, or a configured value outside
+        // the catalog): fall back to the fixed list — behavior unchanged.
+        return EFFORTS.map((id) => ({ value: id, label: id }));
+      }
+      const efforts = entry.reasoning?.efforts;
+      if (!Array.isArray(efforts) || efforts.length === 0) {
+        // Known model without declared effort control: only 'none' — let the
+        // model use its own default instead of sending an unverifiable level.
+        return [{ value: 'none', label: 'none' }];
+      }
+      // 'none' stays FIRST (same placement the fixed list had); the model's
+      // own levels follow in the catalog's order.
+      const options = efforts.some((effort) => effort.id === 'none')
+        ? []
+        : [{ value: 'none', label: 'none' }];
+      for (const effort of efforts) {
+        options.push({
+          value: effort.id,
+          label: typeof effort.name === 'string' && effort.name.length > 0 ? effort.name : effort.id,
+        });
+      }
+      return options;
+    }
+
+    /**
+    * Whether an explicitly configured effort cannot be taken by the selected
+    * model (per the catalog). Unknown models never mismatch (the fixed-list
+    * fallback applies); undefined/''/'none' never mismatch.
+    */
+    function effortMismatch(effort, groups, provider, model) {
+      if (effort === undefined || effort === null || effort === '' || effort === 'none') return false;
+      if (findModelEntry(groups, provider, model) === undefined) return false;
+      return !effortOptionsFor(groups, provider, model).some((option) => option.value === effort);
+    }
+
     // Fields the card manages on the preset layer (inherit-or-override vs the
     // base) and on the advanced layer (user-only; no shipped default).
     const PRESET_FIELDS = ['enabled', 'provider', 'model', 'effort'];
     const ADVANCED_FIELDS = ['maxTokens', 'temperature'];
 
     // Profile management lives behind the /omds RPC (registered by the seeder
-    // host half on the same loopback channel as provider-status). The card
-    // never writes a native preset directory itself — no id field, no path,
-    // just the display name the user types.
+    // host half). The card never writes a native preset directory itself — no
+    // id field, no path, just the display name the user types.
     const BUNDLED_PROFILE_ID = 'oh-my-dsh-slim';
     const BUNDLED_PROFILE_NAME = '极简角色委派';
     const NEW_PROFILE_SENTINEL = '__new__';
@@ -64,12 +115,6 @@ window.__ModuleLoader__.load({
     const zh = {
       desc: '专家角色Subagent委派预设和设置。',
       orchestratorNote: 'orchestrator 即当前会话主模型：在对话输入框的模型选择器中更换，默认模型在 设置-模型 维护。',
-      webFetch: 'web_fetch 工具',
-      webFetchBenefit: '开启后模型可直接抓取目标网页原文，减少反复搜索拼凑片段。',
-      webFetchRestart: '变更需重启 DSH 生效。',
-      webFetchRisk: 'SSRF 风险：provider 无内网防护，勿在可触达敏感内网的部署开启。',
-      webFetchProviderMissing: '未检测到 provider：需安装 web-fetch-http（README「进阶配置」）后重启。',
-      webFetchProviderUnknown: '无法检测 provider 状态，开启前请确认已安装 provider。',
       enabled: '启用',
       model: '模型',
       effort: '思考强度',
@@ -90,10 +135,11 @@ window.__ModuleLoader__.load({
       readOnly: '当前连接只读，无法在此修改配置。',
       modelsLoading: '模型目录加载中…',
       modelsEmpty: '未发现可用模型：请先在 设置-模型 导入 provider。',
-      modelsError: '模型目录加载失败，重开设置页可重试。',
+      modelsError: '模型目录不可用（当前会话/宿主未提供枚举）；已配置的模型值可正常查看与保存。',
       currentValueTag: '当前值',
       invalidMaxTokens: '需为正整数',
       invalidTemperature: '需在 0–2 之间',
+      effortMismatch: '当前模型不支持该思考强度：请重选下拉中的档位，或清空以继承默认。',
       roleOracle: '架构 / 攻坚 / 代码审查（只读）',
       roleDesigner: 'UI/UX 与视觉实现（可写）',
       roleFixer: '代码实现、修复与重构（可写）',
@@ -131,12 +177,6 @@ window.__ModuleLoader__.load({
     const en = {
       desc: 'Expert-role subagent delegation preset and settings.',
       orchestratorNote: 'The orchestrator is the session\u2019s main model: change it in the composer\u2019s model picker; defaults live in Settings \u2192 Models.',
-      webFetch: 'web_fetch tool',
-      webFetchBenefit: 'When enabled, the model can fetch the target page text directly instead of repeatedly searching and stitching snippets.',
-      webFetchRestart: 'Takes effect after restarting DSH.',
-      webFetchRisk: 'SSRF risk: the provider has no private-network protection; do not enable in deployments that can reach sensitive internal targets.',
-      webFetchProviderMissing: 'No provider detected: install web-fetch-http (README \u201cAdvanced configuration\u201d) and restart.',
-      webFetchProviderUnknown: 'Provider status unavailable; confirm a provider is installed before enabling.',
       enabled: 'Enabled',
       model: 'Model',
       effort: 'Reasoning effort',
@@ -157,10 +197,11 @@ window.__ModuleLoader__.load({
       readOnly: 'This connection is read-only; configuration cannot be edited here.',
       modelsLoading: 'Loading model catalog\u2026',
       modelsEmpty: 'No models found: import a provider under Settings \u2192 Models first.',
-      modelsError: 'Failed to load the model catalog; reopen settings to retry.',
+      modelsError: 'Model catalog unavailable (this session/host exposes no enumeration); configured model values still render and save.',
       currentValueTag: 'Current',
       invalidMaxTokens: 'Must be a positive integer',
       invalidTemperature: 'Must be between 0 and 2',
+      effortMismatch: 'This model does not support the selected reasoning effort: pick one from the list, or clear it to inherit the default.',
       roleOracle: 'Architecture / hard problems / code review (read-only)',
       roleDesigner: 'UI/UX and visual implementation (writable)',
       roleFixer: 'Code implementation, fixes, and refactoring (writable)',
@@ -237,7 +278,7 @@ window.__ModuleLoader__.load({
           temperature: adv.temperature,
         };
       }
-      return { preset: presetName, webFetch: value?.webFetch === true, roles };
+      return { preset: presetName, roles };
     }
 
     /**
@@ -250,17 +291,6 @@ window.__ModuleLoader__.load({
     function planUserOps(base, user, draft) {
       const ops = [];
       const presetName = draft.preset;
-      // webFetch: top-level namespace field, no bundled base — an explicit
-      // `true` is stored; `false` (the default) is unset (inherit).
-      {
-        const path = ['webFetch'];
-        const uv = getPath(user, path);
-        if (draft.webFetch === true) {
-          if (uv !== true) ops.push({ op: 'set', path, value: true });
-        } else if (uv !== undefined) {
-          ops.push({ op: 'unset', path });
-        }
-      }
       for (const roleId of ROLE_IDS) {
         const d = draft.roles?.[roleId] ?? {};
         for (const field of PRESET_FIELDS) {
@@ -388,7 +418,6 @@ window.__ModuleLoader__.load({
       }
       return {
         preset: presetName,
-        webFetch: config.webFetch === true,
         mcpServers: { ...(base?.mcpServers ?? {}), ...(config.mcpServers ?? {}) },
         presets: {
           ...(base?.presets ?? {}),
@@ -472,7 +501,6 @@ window.__ModuleLoader__.load({
       const baselineDraft = buildDraft(effective, effective?.advanced);
       const out = {
         preset,
-        webFetch: draft?.webFetch === true,
         mcpServers: config.mcpServers ?? {},
         presets: {},
         advanced: { roles: {} },
@@ -628,6 +656,8 @@ window.__ModuleLoader__.load({
     function RoleRow({ roleId, draft, groups, modelsStatus, advOpen, onAdvancedToggle, onChange, t }) {
       const role = draft.roles[roleId];
       const locked = roleId === 'observer';
+      const effortOptions = effortOptionsFor(groups, role.provider, role.model);
+      const effortBad = effortMismatch(role.effort, groups, role.provider, role.model);
       const descKey = `role${roleId[0].toUpperCase()}${roleId.slice(1)}`;
       const invalid = {
         maxTokens: role.maxTokens !== undefined && role.maxTokens !== '' && parseAdvancedNumber(role.maxTokens, 'maxTokens') === null,
@@ -659,7 +689,7 @@ window.__ModuleLoader__.load({
             onChange: (e) => onChange(roleId, { effort: e.target.value === '' ? undefined : e.target.value }),
             style: { ...controlStyle, width: 120, flex: 'none' },
           },
-            EFFORTS.map((level) => React.createElement('option', { key: level, value: level }, level)),
+            effortOptions.map((option) => React.createElement('option', { key: option.value, value: option.value }, option.label)),
           ),
           React.createElement('button', {
             type: 'button', 'aria-label': t('advanced'), 'aria-expanded': advOpen,
@@ -668,6 +698,7 @@ window.__ModuleLoader__.load({
           }, React.createElement(ui.IconChevronDownOutline14, { size: 14, style: { transform: advOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s' } })),
         ),
         role.effort === 'none' ? React.createElement('div', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('effortNoneHint')) : null,
+        effortBad ? React.createElement('div', { style: { fontSize: 12, lineHeight: '16px', color: 'var(--dsw-alias-state-error-primary)' } }, t('effortMismatch')) : null,
         locked ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12 } },
           React.createElement(ui.IconWarningOutline16, { size: 14 }), t('observerLocked')) : null,
         advOpen ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, borderTop: `1px solid ${color.border}`, paddingTop: 8 } },
@@ -692,7 +723,7 @@ window.__ModuleLoader__.load({
     }
 
     // -------------------------------------------------------------- card
-    function SettingsCard({ scope, connection, t }) {
+    function SettingsCard({ scope, connection, remote, t }) {
       const [snap, setSnap] = React.useState(scope.getSnapshot());
       React.useEffect(() => scope.subscribe(() => setSnap(scope.getSnapshot())), [scope]);
       // draft === undefined → clean (mirror the snapshot / profile config);
@@ -715,18 +746,45 @@ window.__ModuleLoader__.load({
       const [toast, setToast] = React.useState(null);
       const [models, setModels] = React.useState({ status: 'loading', groups: [] });
       const loadModels = React.useCallback(() => {
-        connection.api.llm.models({}).then((response) => {
-          setModels(response.result.ok
-            ? { status: 'ready', groups: response.result.value.groups }
-            : { status: 'error', groups: [] });
+        // DSH 0.1.2: the model catalog moved behind the host remote face
+        // (ctx.remote.session.modelCatalog()); 0.1.1's connection.api.llm is
+        // gone. Degrade to the error notice when the face is unavailable so
+        // the card still renders with configured values intact.
+        if (remote?.session?.modelCatalog === undefined) {
+          setModels({ status: 'error', groups: [] });
+          return;
+        }
+        Promise.resolve(remote.session.modelCatalog()).then((response) => {
+          if (response?.ok !== true || response.value === undefined) {
+            setModels({ status: 'error', groups: [] });
+            return;
+          }
+          const groups = (response.value.groups ?? []).map((group) => ({
+            id: group.id,
+            name: group.name,
+            models: group.models.map((model) => ({
+              id: model.id,
+              name: model.name,
+              // reasoning.efforts are the per-model supported effort levels;
+              // the effort dropdown and its mismatch check read them here.
+              ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+            })),
+          }));
+          setModels({ status: 'ready', groups });
         }).catch(() => setModels({ status: 'error', groups: [] }));
-      }, [connection]);
+      }, [remote]);
       React.useEffect(() => { loadModels(); }, [loadModels]);
 
       const writable = snap.writable === true;
       const effective = snap.value ?? EMPTY_EFFECTIVE;
       const base = snap.base ?? EMPTY_BASE;
       const user = snap.user ?? EMPTY_USER;
+      // Profiles persist a delta against the BUNDLED defaults (not against
+      // the profile's own saved snapshot): with the wrong baseline a second
+      // save rewrites profile.json and silently drops fields that matched
+      // the previous save (e.g. explorer=A saved first, designer=B saved
+      // second would lose explorer).
+      const defaultsBaseline = mergeProfileConfig(base, {});
 
       const refreshRoster = React.useCallback(() => {
         if (!profileAdapter) return Promise.resolve();
@@ -780,7 +838,10 @@ window.__ModuleLoader__.load({
       const invalid = ROLE_IDS.some((roleId) => {
         const role = current.roles[roleId];
         return parseAdvancedNumber(role.maxTokens, 'maxTokens') === null
-          || parseAdvancedNumber(role.temperature, 'temperature') === null;
+          || parseAdvancedNumber(role.temperature, 'temperature') === null
+          // A stored effort the selected model cannot take (e.g. flash+medium)
+          // blocks saving until reselected or cleared (clear = inherit).
+          || effortMismatch(role.effort, models.groups, role.provider, role.model);
       });
 
       const changeRole = (roleId, patch) => {
@@ -795,7 +856,11 @@ window.__ModuleLoader__.load({
       const run = async (writeOps, doneText) => {
         setSaving(true);
         try {
-          for (const op of writeOps) await scope.write(op);
+          // DSH 0.1.2 settings scope: set/unset are top-level fields only;
+          // multi-level paths (presets.<preset>.<role>.<field>) go through
+          // one atomic mutate(ops) — the documented replacement for the
+          // 0.1.1 per-op scope.write (which is gone).
+          await scope.mutate(writeOps);
           setDraft(undefined);
           setToast({ text: doneText, icon: React.createElement(ui.IconCheckOutline16, { size: 14 }) });
         } finally {
@@ -823,7 +888,14 @@ window.__ModuleLoader__.load({
           setRoster((previous) => ({
             ...previous,
             profiles: previous.profiles.map((entry) => (
-              entry.id === profile.id ? { ...entry, ...saved, revision } : entry
+              entry.id === profile.id
+                // Backfill the just-persisted snapshot so the editor keeps
+                // showing the saved values (the save response carries only
+                // id/displayName/revision; without the config backfill the
+                // card re-renders from the previous profile.json and looks
+                // like a reset to defaults).
+                ? { ...entry, ...saved, revision, config: profileConfig(config) }
+                : entry
             )),
           }));
           setDraft(undefined);
@@ -852,7 +924,7 @@ window.__ModuleLoader__.load({
           setProfileError(t('profileSaveFailed'));
           return;
         }
-        void saveCustom(selectedProfile, draftToConfig(draft, selectedProfile.config, editEffective));
+        void saveCustom(selectedProfile, draftToConfig(draft, selectedProfile.config, defaultsBaseline));
       };
 
       const confirmCreate = async () => {
@@ -961,7 +1033,7 @@ window.__ModuleLoader__.load({
           setNameModal({ open: true, input: '', error: undefined });
           return; // confirmCreate performs the switch
         } else if (selectedProfile) {
-          const ok = await saveCustom(selectedProfile, draftToConfig(draft, selectedProfile.config, editEffective));
+          const ok = await saveCustom(selectedProfile, draftToConfig(draft, selectedProfile.config, defaultsBaseline));
           if (!ok) return;
         }
         const next = pendingSwitch;
@@ -993,29 +1065,6 @@ window.__ModuleLoader__.load({
       // cards with no host chrome — unlike built-in cards there is no
       // host-provided disclosure wrapper, so the card draws its own.
       const [cardOpen, setCardOpen] = React.useState(false);
-
-      // Fetch-provider availability from the seeder's /omds RPC (loopback).
-      // 'ready' | 'missing' | 'unknown' — unknown keeps the toggle enabled
-      // with a hint (no RPC channel, e.g. headless or older hosts).
-      const [provider, setProvider] = React.useState({ status: 'unknown', ids: [] });
-      React.useEffect(() => {
-        let alive = true;
-        connection.rpc?.call?.('/omds', 'provider-status', {}).then((response) => {
-          if (!alive) return;
-          const value = response?.ok === true ? response.value : undefined;
-          setProvider(value !== undefined
-            ? { status: value.installed === true ? 'ready' : 'missing', ids: value.providerIds ?? [] }
-            : { status: 'unknown', ids: [] });
-        }).catch(() => { if (alive) setProvider({ status: 'unknown', ids: [] }); });
-        return () => { alive = false; };
-      }, [connection]);
-
-      const changeWebFetch = (enabled) => {
-        setDraft((previous) => {
-          const next = previous ?? buildDraft(editEffective, editEffective?.advanced);
-          return { ...next, webFetch: enabled };
-        });
-      };
 
       const headerButton = React.createElement('button', {
         type: 'button',
@@ -1081,8 +1130,6 @@ window.__ModuleLoader__.load({
           : null,
       );
 
-      // The action row sits at the top of the editable area (next to the
-      // profile strip and webFetch toggle) so both save and reset are always
       // reachable without scrolling; dirty only switches the "unsaved" note
       // and the save button's availability.
       const actions = React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' } },
@@ -1155,24 +1202,6 @@ window.__ModuleLoader__.load({
         actions,
         React.createElement('div', { style: { display: 'flex', gap: 6, fontSize: 12, color: color.secondary, background: color.hover, borderRadius: 8, padding: '6px 8px' } },
           t('orchestratorNote')),
-        React.createElement('div', { style: { border: `1px solid ${color.border}`, borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 } },
-          React.createElement('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 10, minWidth: 0 } },
-            React.createElement(Switch, {
-              checked: current.webFetch === true,
-              disabled: provider.status === 'missing',
-              onChange: () => changeWebFetch(!(current.webFetch === true)), label: t('webFetch'),
-            }),
-            React.createElement('span', { style: { fontSize: 13, fontWeight: 600, color: color.text, flex: 'none' } }, t('webFetch')),
-          ),
-          React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('webFetchBenefit')),
-          provider.status === 'missing'
-            ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12, background: color.warnBg, borderRadius: 8, padding: '6px 8px' } },
-              React.createElement(ui.IconWarningOutline16, { size: 14 }), t('webFetchProviderMissing'))
-            : provider.status === 'unknown'
-              ? React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('webFetchProviderUnknown'))
-              : React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('webFetchRestart')),
-          React.createElement('span', { style: { fontSize: 11, color: 'var(--dsw-alias-state-error-primary)', lineHeight: '16px' } }, t('webFetchRisk')),
-        ),
         roleRows,
         !writable ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12 } },
           React.createElement(ui.IconWarningOutline16, { size: 14 }), t('readOnly')) : null,
@@ -1192,7 +1221,7 @@ window.__ModuleLoader__.load({
 
     // ----------------------------------------------------------------- apply
     const name = NS;
-    const inject = ['slots', 'locale', 'connection'];
+    const inject = ['slots', 'locale', 'connection', 'remote', 'remote.session'];
 
     function apply(ctx) {
       const gaps = missingPrimitives(ui);
@@ -1212,7 +1241,7 @@ window.__ModuleLoader__.load({
           priority: 1,
           locale: NS,
           inject: () => ({ t }),
-        }, () => React.createElement(SettingsCard, { t, scope, connection: ctx.connection })));
+        }, () => React.createElement(SettingsCard, { t, scope, connection: ctx.connection, remote: ctx.remote })));
       });
     }
 
@@ -1223,6 +1252,8 @@ window.__ModuleLoader__.load({
     exports.missingPrimitives = missingPrimitives;
     exports.planUserOps = planUserOps;
     exports.buildDraft = buildDraft;
+    exports.effortOptionsFor = effortOptionsFor;
+    exports.effortMismatch = effortMismatch;
     exports.initialProfileRoster = initialProfileRoster;
     exports.normalizeProfileRoster = normalizeProfileRoster;
     exports.mergeProfileConfig = mergeProfileConfig;

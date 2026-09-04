@@ -1,3 +1,3 @@
 name: 极简角色委派
-description: oh-my-dsh-slim — orchestrator + 5 个专职角色（oracle/designer/fixer/explorer/librarian；observer 预留、默认关闭），支持 JSON 驱动的模型、工具、effort 与 Librarian child-scope MCP；随 preset 分发插件。适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal）。
+description: 合理搭配你的模型及 Token 额度，让 DSH 按任务类型自动委派专业子代理，覆盖架构分析、UI/UX、代码实现、代码库探索与文档调研。安装后自动配置，并支持按角色设置思考强度和工具权限。
 order: 10

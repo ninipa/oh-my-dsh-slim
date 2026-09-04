@@ -29,6 +29,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { assertHostCompatible } from './host-version.js';
 
 function resolveDshPackage() {
   const roots = [];
@@ -59,13 +60,16 @@ function resolveDshPackage() {
 
 const require = createRequire(resolveDshPackage());
 
+
+// Host compatibility gate: one throw here aborts the whole preset mount (fail-fast).
+assertHostCompatible();
 export const name = 'sandbox-strip';
 export const inject = ['sandboxPolicy'];
 
 export const STRIP_NOTE = '[sandbox: stripped sandbox_permissions/justification from this call - delegated child permission scope is fixed]';
 export const TOP_STRIP_NOTE = '[sandbox: stripped invalid escalation arguments (empty justification or non-widening sandbox_permissions); a legitimate escalation request (strictly wider mode + non-empty justification) still prompts for approval]';
 
-// dsh-sandbox is ESM; load once and cache (same pattern as web-fetch-gate).
+// dsh-sandbox is ESM; load once and cache (same pattern as role-subagent).
 let widerModesPromise = undefined;
 async function loadWiderModes() {
   widerModesPromise ??= import(pathToFileURL(require.resolve('@deepseek-ai/dsh-sandbox')).href)

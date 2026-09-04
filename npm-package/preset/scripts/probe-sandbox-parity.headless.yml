@@ -1,0 +1,14 @@
+# Zero-cost host-parity probe for sandbox-strip.js (WIDER_MODES / policy /
+# NOTE: run through scripts/run-host-probes.mjs (substitutes __WORKSPACE__); direct copy-paste needs the token replaced.
+# doomed-shape semantics against the REAL host). Run through
+# scripts/run-host-probes.mjs; __WORKSPACE__ is substituted by the runner.
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: oh-my-dsh-slim
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: probe-sandbox-parity
+      name: file://__WORKSPACE__/scripts/probe-sandbox-parity.js

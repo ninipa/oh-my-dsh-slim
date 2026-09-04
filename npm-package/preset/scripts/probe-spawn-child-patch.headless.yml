@@ -1,0 +1,16 @@
+# Probe overlay for child-join reproduction (HANDOFF 4A regression):
+# NOTE: run through scripts/run-host-probes.mjs (substitutes __WORKSPACE__); direct copy-paste needs the token replaced.
+# stock headless + preset mounted; probe creates a parent agent (mount) and a
+# child agent (composeFrom) and enumerates the child's visible tools.
+#   DSH_HOME=<scratch> dsh --profile headless \
+#     --patch scripts/probe-spawn-child-patch.headless.yml probe
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: oh-my-dsh-slim
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: probe-spawn-child
+      name: file://__WORKSPACE__/scripts/probe-spawn-child.js

@@ -9,6 +9,14 @@ subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 > Persona text adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), attribution retained —
 > see [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
 
+> **⚠️ DSH version requirement (0.5.0)**: this release targets **DSH 0.1.2-rc.1 (latest)**. DSH
+> changed substantially in 0.1.2, so **oh-my-dsh-slim 0.5.0 is NOT compatible with older DSH
+> releases** — on DSH 0.1.1 or below, stay on oh-my-dsh-slim **0.4.0**. If you upgrade anyway on
+> an older host, nothing breaks: the plugin detects the mismatch, leaves your existing preset
+> directory untouched (it stays fully usable), and shows a notice under
+> **Settings → Plugins → oh-my-dsh-slim-compat**. Also note: **upgrading requires a DSH restart**
+> (plugin code is mounted once per host process; new sessions alone do not pick it up).
+
 ## What it solves
 
 DSH's default orchestration is "one model does everything". This preset splits work into
@@ -22,8 +30,11 @@ specialist lanes, and the orchestrator plans, dispatches, and integrates:
 
 Delegation is **background-first** (continuable): the orchestrator dispatches lanes and ends its
 turn; the runtime wakes it with a settlement notice when a lane finishes, so it can integrate
-results. The `subagent_result` tool reads a finished subagent's final message **without waking it**
-(zero extra model turns).
+results. The orchestrator follows a strict delegation discipline — after dispatching independent
+lanes it ends its turn with a brief status note (no polling, no re-doing a running lane's scope
+in the same turn), treats a lane's interim report as "not settled yet", and only finalizes on the
+settlement notice. The `subagent_result` tool reads a finished subagent's final message **without
+waking it** (zero extra model turns).
 
 ## Role matrix
 
@@ -46,26 +57,23 @@ results. The `subagent_result` tool reads a finished subagent's final message **
 
 ## Install
 
-Requires DSH ≥ 0.1.1-rc.2 and a DeepSeek API key (default models route through
-deepseek-official).
+Requires **DSH 0.1.2-rc.1 or newer** and a DeepSeek API key (default models route through
+deepseek-official). Older DSH releases are **not supported by 0.5.0** — on DSH 0.1.1 or below
+use oh-my-dsh-slim 0.4.0 (see the version note at the top).
 
-**Option A — plugin marketplace (recommended):**
-
-```bash
-dsh plugin --profile web add oh-my-dsh-slim
-```
-
-Also listed in the DSH plugin marketplace GUI and the
+**Option A — plugin marketplace GUI (recommended):** open **Settings → Plugins** in the DSH web
+GUI, search for `oh-my-dsh-slim` in the marketplace, and install. It is also listed in the
 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) catalog.
-The package ships a seeder that materializes the preset into
-`$DSH_HOME/.agent-presets/oh-my-dsh-slim` automatically (updates come with plugin upgrades;
-your previous copy is backed up).
 
 **Option B — CLI:**
 
 ```bash
 dsh plugin --profile web add oh-my-dsh-slim
 ```
+
+The package ships a seeder that materializes the preset into
+`$DSH_HOME/.agent-presets/oh-my-dsh-slim` automatically (updates come with plugin upgrades;
+your previous copy is backed up).
 
 > ℹ️ This uses the default harness home (`~/.dsh`). If your deployment uses a
 > custom home (e.g. an isolated desktop-app environment), set `DSH_HOME` to it
@@ -80,7 +88,9 @@ git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-
 Done — the preset appears immediately. Create a new session and pick **极简角色委派** in
 **Settings → Agent Presets**.
 
-- **Update**: `cd "$DSH_HOME/.agent-presets/oh-my-dsh-slim" && git pull`
+- **Update**: `cd "$DSH_HOME/.agent-presets/oh-my-dsh-slim" && git pull` (or upgrade the plugin),
+  then **restart DSH** — plugin code (tool schemas, injected reminders) is mounted once per host
+  process, so new sessions alone do not load the new code
 - **Rollback**: `git checkout <old-tag>` or just delete the directory. Presets are locked per
   session at creation time; running sessions are unaffected.
 
@@ -115,10 +125,14 @@ All three channels share one document shape (schema:
 
 - Per-role overrides: `enabled` / `model` / `effort` / `deny` / `mcps`; `temperature` / `maxTokens`
   are advanced keys (`advanced.roles.<roleId>`)
-- **Effort vocabulary**: `effort` accepts `none` / `off` / `low` / `medium` / `high` / `max`.
-  `none` omits the `reasoningEffort` parameter entirely — for models that do not support effort
-  control (e.g. local LLMs without a reasoning-effort field); `off` explicitly disables reasoning
-  on models that support the parameter
+- **Effort vocabulary**: `none` omits the `reasoningEffort` parameter entirely — for models that
+  do not support effort control (e.g. local LLMs without a reasoning-effort field); `off`
+  explicitly disables reasoning on models that support the parameter. Other levels
+  (`low`/`medium`/`high`/`max` …) are **model-scoped**: the adapter accepts only the levels the
+  selected model declares (the DeepSeek adapter, for example, accepts `off/low/high/max` and
+  rejects `medium`), and an unsupported level fails loudly at request time. The GUI card's
+  effort dropdown is built from each model's declared set and blocks out-of-set values with an
+  inline warning
 - **Model validation**: at delegation time the configured model id is checked against the
   providers you imported in **Settings → Models**. An unknown model fails loud on the first
   delegation, listing every imported model (including the vision-capable subset) — no silent
@@ -129,7 +143,9 @@ All three channels share one document shape (schema:
 **GUI card** (ships with the npm package): after install, a card appears under
 **Settings → Plugins → Plugin configuration** — per-role toggle/model/effort editable inline,
 advanced maxTokens/temperature behind a warning sub-section, and a model dropdown sourced from
-the same catalog as the composer's picker. The orchestrator row is informational only: it is the
+the same catalog as the composer's picker. The **effort dropdown is scoped to the selected
+model's declared reasoning efforts** (unsupported levels are hidden; an explicit mismatch warns
+inline and blocks save). The orchestrator row is informational only: it is the
 session's main model, changed in the composer's picker (defaults under Settings → Models). Saving
 reports which changes apply immediately (effort/temperature) and which start with new sessions.
 
@@ -158,49 +174,18 @@ manages named configurations, each backed by its own native agent preset:
   (`profile.json` beside the preset composition), which is how two profiles never leak into each
   other.
 
-## Advanced configuration: enabling web_fetch (optional, at your own risk)
+## web_fetch (follows the host)
 
-Public presets ship with `web_fetch` **off** (stock DSH bundles no fetch provider — only
-`web_search`). Enabling takes two steps: **① install the provider (host level, once) and ② flip
-the toggle in the settings card**.
-
-**① Install the provider** (`@deepseek-ai/dsh-web-fetch-http`, host profile layer — the preset
-itself is not modified):
-
-1. Add `"@deepseek-ai/dsh-web-fetch-http": "^0.1.1-rc.2"` to the `dependencies` of
-   `$DSH_HOME/profiles/web/package.json` (align the version with your host DSH), then run
-   `pnpm install` in `$DSH_HOME/profiles/web`.
-2. Append to `$DSH_HOME/profiles/web/cordis.patch.yml` (**do not** enable the host's own
-   `tool-web` row):
-   ```yaml
-   - insert:
-       - id: web-fetch-http
-         name: '@deepseek-ai/dsh-web-fetch-http'
-   ```
-3. Restart the GUI — the provider is ready and the `web_fetch` toggle in the settings card
-   becomes switchable.
-
-**② Flip the toggle**: Settings → Plugins → Plugin configuration → expand the oh-my-dsh-slim
-card → enable "web_fetch tool" → **Save** → **restart DSH** (webFetch is a composition-level
-setting, like role toggles: it takes effect after a process restart; role model/effort changes
-apply immediately).
-
-**Payoff**: after a search locates a URL, `web_fetch` retrieves the target page directly
-(official docs / source / registry), avoiding repeated search-and-patch rounds.
-
-**Risk**: `dsh-web-fetch-http` is an **SSRF primitive** — no private/loopback/link-local
-blocking and no domain allowlist (upstream README: "must not be enabled near sensitive internal
-network targets"). Only for single-user controlled machines; do not enable in deployments that
-can reach sensitive internal targets. Rollback = remove the patch block, drop the dependency,
-and restart.
+Since host DSH 0.1.2 the harness itself ships `web_fetch` with built-in SSRF protection,
+enabled by default for every session and every delegated child. This preset no longer wires its
+own fetch provider or exposes a `webFetch` switch: the previous "advanced configuration" section
+and the `web-fetch-gate` plugin were retired. `web_search` remains available from the host web
+service.
 
 ## Roadmap
 
-- ~~**GUI configuration**~~ — **Done**: role toggles, per-role model selection (from your imported
-  providers, same catalog as the composer picker) and reasoning effort are editable in
-  **Settings → Plugins → Plugin configuration** — install the npm package and the card appears
-  (host-native plugin config surface). The orchestrator is informational only: it is the session's
-  main model, changed in the composer's picker (defaults under Settings → Models).
+- **observer re-enable** — waiting on upstream DSH support for forwarding message attachments
+  into subagent contexts (see the role matrix note above).
 
 ## Self-tests & probes (all zero-cost)
 
@@ -208,16 +193,17 @@ and restart.
 # Static validation (structure / keys / persona dead-references / soft-disable assertions)
 node scripts/t0-validate.mjs .
 
-# Unit tests (config merge / effort injection / delegation contract / subagent_result)
+# Unit tests (config merge / effort injection / delegation contract / subagent_result /
+# settings schema / sandbox strip / early-close ledger / preset seeder / profile RPC / client card)
 node scripts/test-config-loader.mjs && node scripts/test-effort-plugin.mjs
 node scripts/test-role-subagent.mjs && node scripts/test-subagent-result.mjs
+node scripts/test-settings-schema.mjs && node scripts/test-sandbox-strip.mjs
+node scripts/test-early-close-context.mjs && node scripts/test-preset-seeder.mjs
+node scripts/test-profile-rpc.mjs && node scripts/test-client-card.mjs
 
-# Two probes to run after every DSH upgrade (probe first, GUI later)
-# ① model-modality overview across all providers
-# ② preset compatibility: real composition boot + per-role filter validation + sessionQuery reads
-#    (replace REPLACE_WITH_REPO_ABS_PATH in the patch files with this repo's absolute path first)
-DSH_HOME=<scratch-home> dsh --profile headless --patch scripts/probe-capabilities-patch.headless.yml probe
-DSH_HOME=<scratch-home> dsh --profile headless --patch scripts/probe-patch.headless.yml probe
+# Host-contract probe battery (8 probes / 9 phases, zero-model) — run after every DSH upgrade.
+# Bootstraps a scratch DSH_HOME automatically (no credentials needed); see scripts/TEST-INVENTORY.md
+node scripts/run-host-probes.mjs          # --list / --only <name> / --keep for options
 ```
 
 ## Acceptance checklist
@@ -228,7 +214,11 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
 
 ## Known limits
 
-- **Non-vision main models cannot receive pasted images**: DSH rc.2 hard-blocks image attachments
+- **Upgrading requires a DSH restart**: the agent-plane composition mounts **once per host
+  process** — config rows (persona text, model routes) re-resolve per session, but plugin code
+  (tool schemas, tool descriptions, injected reminder strings) is frozen in-process. After any
+  plugin/preset upgrade, restart DSH; new sessions alone still run the old code
+- **Non-vision main models cannot receive pasted images**: DSH blocks image attachments
   at send time based on the main model's capability (`MODEL_DOES_NOT_SUPPORT_IMAGES`). For image
   analysis, use a vision-capable main model (e.g. deepseek-v4-flash-vision-exp) directly — or wait
   for upstream attachment forwarding. If your model actually supports images but is still blocked,
@@ -259,9 +249,9 @@ expected behavior) for verifying a fresh deployment. T3 uses the baseline projec
   plugin mitigates this by supplying the model with facts: a live "currently running background
   subagents" block in the system prompt (re-rendered every turn, same mechanism as the host's
   `sandbox:policy`), a "Decision point" reminder attached to every successful delegation result,
-  and a persona clause against claiming completion while a child is unsettled. Since 0.3.3 the
-  ledger is three-state (`running` → `reported` → `settled`): a child's **report** ("Background
-  subagent X reported:") is shown as "已回报内容，等待正式完成通知（reported ≠ 完成）" — a report
+  and a persona clause against claiming completion while a child is unsettled. The ledger is
+  three-state (`running` → `reported` → `settled`): a child's interim **report** (host frame
+  "Agent <id> sent a message:") is shown as "已回报内容，等待正式完成通知（reported ≠ 完成）" — a report
   neither concludes the child's turn nor changes its lifetime, and only the **finish notice**
   (unconditional for every established child, incl. failure/cancel/token-ceiling) settles it, so
   the orchestrator no longer announces "the subagent is done" tens of seconds early. In practice
