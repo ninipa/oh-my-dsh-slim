@@ -9,13 +9,17 @@ subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 > Persona text adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), attribution retained —
 > see [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
 
-> **⚠️ DSH version requirement (0.5.0)**: this release targets **DSH 0.1.2-rc.1 (latest)**. DSH
-> changed substantially in 0.1.2, so **oh-my-dsh-slim 0.5.0 is NOT compatible with older DSH
-> releases** — on DSH 0.1.1 or below, stay on oh-my-dsh-slim **0.4.0**. If you upgrade anyway on
-> an older host, nothing breaks: the plugin detects the mismatch, leaves your existing preset
-> directory untouched (it stays fully usable), and shows a notice under
-> **Settings → Plugins → oh-my-dsh-slim-compat**. Also note: **upgrading requires a DSH restart**
-> (plugin code is mounted once per host process; new sessions alone do not pick it up).
+> **⚠️ DSH version support (0.5.1)**: **DSH 0.1.2-rc.1 through 0.1.5-rc.1** — both host lines are
+> verified end to end (0.1.2-rc.1 and 0.1.5-rc.1). On DSH 0.1.1 or below, stay on oh-my-dsh-slim
+> **0.4.0**: the plugin detects the mismatch, leaves your existing preset directory untouched (it
+> stays fully usable) and shows a notice under **Settings → Plugins → oh-my-dsh-slim-compat**.
+> **Upgrading requires a DSH restart** (plugin code is mounted once per host process; new sessions
+> alone do not pick it up).
+>
+> **Coming from 0.5.0 on DSH 0.1.5**: the built-in preset repairs itself (the package re-seeds it),
+> but a **custom configuration** keeps its directory content. If DSH 0.1.5 cannot mount one, the
+> settings card now marks that configuration and repairs it in place with one click, keeping a
+> backup of `agent.cordis.yml` beside it. You can also recreate the configuration instead.
 
 ## What it solves
 
@@ -57,9 +61,9 @@ waking it** (zero extra model turns).
 
 ## Install
 
-Requires **DSH 0.1.2-rc.1 or newer** and a DeepSeek API key (default models route through
-deepseek-official). Older DSH releases are **not supported by 0.5.0** — on DSH 0.1.1 or below
-use oh-my-dsh-slim 0.4.0 (see the version note at the top).
+Requires **DSH 0.1.2-rc.1 through 0.1.5-rc.1** (both verified) and a DeepSeek API key (default
+models route through deepseek-official). Older DSH releases are **not supported by 0.5.1** — on
+DSH 0.1.1 or below use oh-my-dsh-slim 0.4.0 (see the version note at the top).
 
 **Option A — plugin marketplace GUI (recommended):** open **Settings → Plugins** in the DSH web
 GUI, search for `oh-my-dsh-slim` in the marketplace, and install. It is also listed in the
@@ -194,16 +198,28 @@ service.
 node scripts/t0-validate.mjs .
 
 # Unit tests (config merge / effort injection / delegation contract / subagent_result /
-# settings schema / sandbox strip / early-close ledger / preset seeder / profile RPC / client card)
+# settings schema / sandbox strip / early-close ledger / preset seeder / profile RPC /
+# /omds RPC transport / client card)
 node scripts/test-config-loader.mjs && node scripts/test-effort-plugin.mjs
 node scripts/test-role-subagent.mjs && node scripts/test-subagent-result.mjs
 node scripts/test-settings-schema.mjs && node scripts/test-sandbox-strip.mjs
 node scripts/test-early-close-context.mjs && node scripts/test-preset-seeder.mjs
 node scripts/test-profile-rpc.mjs && node scripts/test-client-card.mjs
+node scripts/test-omds-rpc.mjs
 
-# Host-contract probe battery (8 probes / 9 phases, zero-model) — run after every DSH upgrade.
+# Host-contract probe battery (9 probes / 10 phases, zero-model) — run after every DSH upgrade.
 # Bootstraps a scratch DSH_HOME automatically (no credentials needed); see scripts/TEST-INVENTORY.md
 node scripts/run-host-probes.mjs          # --list / --only <name> / --keep for options
+
+# Web-mode transport probe (zero-model): boots a real web host and checks the card's /omds
+# channel (registration, trust fence, envelope, the one-click configuration migration).
+# `--dsh <install-dir>` points it at another host version for a cross-version check.
+node scripts/probe-omds-web.mjs
+
+# Real-model acceptance (billable): builds a scratch home routing the parent AND every role at
+# ONE model, then runs the isolated smoke + the ECC settlement probe.
+# The model is a flag: --provider/--model/--effort (default opencode-ds-v41-flash/deepseek-flash @ low)
+node scripts/run-real-models.mjs
 ```
 
 ## Acceptance checklist

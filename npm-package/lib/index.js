@@ -36,6 +36,7 @@
 
 import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   cpSync,
   existsSync,
   readFileSync,
@@ -56,6 +57,11 @@ export const name = 'omds-preset-seeder';
 const PRESET_DIR_NAME = 'oh-my-dsh-slim';
 const MARKER_FILE = '.omds-seed.json';
 const PROFILE_CONFIG_NAME = 'profile.json';
+const COMPOSITION_NAME = 'agent.cordis.yml';
+// Backup suffix written beside a composition before the 0.1.5 persona
+// migration rewrites it (never overwritten silently twice: an existing backup
+// is left as-is so the oldest hand-authored file survives).
+const PERSONA_BACKUP_SUFFIX = '.bak-pre-015-persona';
 const PROFILE_ID_PREFIX = 'profile-';
 const PROFILE_ID_HASH_LENGTH = 12;
 const MAX_DISPLAY_NAME_LENGTH = 64;
@@ -113,6 +119,57 @@ function presetDirOf(preset) {
 /** Per-profile snapshot path inside a preset directory. */
 function profileConfigPath(presetDir) {
   return join(presetDir, PROFILE_CONFIG_NAME);
+}
+
+/** Best-effort read of one preset directory's composition. */
+function readComposition(presetDir) {
+  try {
+    return readFileSync(join(presetDir, COMPOSITION_NAME), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Whether a composition still carries the pre-0.1.3-alpha.2 persona row — a
+ * `text:` block scalar with no `prefix:` sibling. DSH 0.1.5 reads only
+ * `prefix`, so such a directory fails its WHOLE preset mount there (observed
+ * 2026-09-10), which is what makes this migration worth surfacing in the card.
+ * @param composition - agent.cordis.yml contents.
+ * @returns whether the persona row needs the 0.1.5 migration.
+ */
+export function personaMigrationNeeded(composition) {
+  const lines = String(composition).split('\n');
+  const start = lines.findIndex((line) => /^- id: persona\s*$/.test(line));
+  if (start === -1) return false;
+  const end = lines.findIndex((line, index) => index > start && /^- /.test(line));
+  const block = lines.slice(start, end === -1 ? undefined : end);
+  const hasText = block.some((line) => /^\s+text:\s*\|-\s*$/.test(line));
+  const hasPrefix = block.some((line) => /^\s+prefix:/.test(line));
+  return hasText && !hasPrefix;
+}
+
+/**
+ * Rewrite a composition's persona row into the dual-key form (`text:` anchored,
+ * plus a `prefix:` alias) so one file mounts on both the 0.1.2 and 0.1.5 host
+ * lines. Text-level on purpose: anything unexpected leaves the file untouched
+ * and reports `changed: false` rather than guessing at a hand-edited file.
+ * @param composition - agent.cordis.yml contents.
+ * @returns the migrated composition and whether it changed.
+ */
+export function migratePersonaComposition(composition) {
+  const source = String(composition);
+  if (!personaMigrationNeeded(source)) return { changed: false, text: source };
+  const lines = source.split('\n');
+  const start = lines.findIndex((line) => /^- id: persona\s*$/.test(line));
+  const end = lines.findIndex((line, index) => index > start && /^- /.test(line));
+  const blockEnd = end === -1 ? lines.length : end;
+  const textIndex = lines.findIndex((line, index) => index > start && index < blockEnd && /^\s+text:\s*\|-\s*$/.test(line));
+  if (textIndex === -1) return { changed: false, text: source };
+  const indent = lines[textIndex].match(/^\s+/)[0];
+  lines[textIndex] = `${indent}text: &omds-persona |-`;
+  lines.splice(blockEnd, 0, `${indent}prefix: *omds-persona`);
+  return { changed: true, text: lines.join('\n') };
 }
 
 function rpcError(code, message) {
@@ -218,6 +275,9 @@ export function makeProfileEndpoints({ agentPresets, getSettings, log }) {
           entry.config = existsSync(configPath)
             ? JSON.parse(readFileSync(configPath, 'utf8'))
             : {};
+          // Reported so the card can offer the one-click 0.1.5 persona
+          // migration; the bundled directory is the seeder's business.
+          entry.needsMigration = personaMigrationNeeded(readComposition(dir));
         }
         profiles.push(entry);
       }
@@ -342,6 +402,48 @@ export function makeProfileEndpoints({ agentPresets, getSettings, log }) {
       logger.info(`omds-preset-seeder: new-session default preset is now ${profileId}`);
       return { profileId, isDefaultForNewSessions: true };
     },
+
+    /**
+     * Rewrite one custom profile's persona row into the dual-key form so it
+     * mounts on both supported host lines (DSH 0.1.5 reads only `prefix`).
+     * Idempotent, backs the composition up first, and refuses anything it does
+     * not recognize rather than guessing at a hand-edited file.
+     */
+    async migrate({ profileId }) {
+      if (!isCustomProfileId(profileId)) {
+        throw rpcError('PROFILE_UNSUPPORTED', 'only custom profiles migrate through /omds; the bundled profile is refreshed by the package seeder');
+      }
+      let preset;
+      try {
+        preset = await agentPresets.resolve(profileId);
+      } catch {
+        throw rpcError('PROFILE_NOT_FOUND', `profile "${profileId}" does not exist`);
+      }
+      if (preset.trust !== 'user') {
+        throw rpcError('PROFILE_UNSUPPORTED', `profile "${profileId}" is not locally authored`);
+      }
+      const dir = presetDirOf(preset);
+      const file = join(dir, COMPOSITION_NAME);
+      let current;
+      try {
+        current = readFileSync(file, 'utf8');
+      } catch (error) {
+        throw rpcError('PROFILE_MIGRATE_FAILED', `cannot read ${COMPOSITION_NAME}: ${error?.message ?? String(error)}`);
+      }
+      const migrated = migratePersonaComposition(current);
+      if (!migrated.changed) return { profileId, changed: false };
+      const backup = `${COMPOSITION_NAME}${PERSONA_BACKUP_SUFFIX}`;
+      try {
+        if (!existsSync(join(dir, backup))) copyFileSync(file, join(dir, backup));
+        const staged = `${file}.tmp-${process.pid}`;
+        writeFileSync(staged, migrated.text);
+        renameSync(staged, file);
+      } catch (error) {
+        throw rpcError('PROFILE_MIGRATE_FAILED', `cannot rewrite ${COMPOSITION_NAME}: ${error?.message ?? String(error)}`);
+      }
+      logger.info(`omds-preset-seeder: migrated profile ${profileId} to the dual-key persona row (backup: ${backup})`);
+      return { profileId, changed: true, backup };
+    },
   };
 }
 
@@ -435,8 +537,27 @@ async function wireSettings(ctx, log) {
 // The /omds RPC owns profile authoring because the browser must never write a
 // native preset directory itself. A serialized queue closes the check/copy
 // race for two simultaneous first-save requests with the same display name.
+//
+// 0.1.5 note: `connection.rpc.handle()` is unusable here. It registers its
+// route through the reading context's `webServer` (`owner.webServer.register`),
+// and cordis resolves that owner to this plugin's fiber — which does not
+// declare `webServer` — so the call throws
+// `cannot get property "webServer" without inject` and the channel silently
+// never appears (the card then reports 配置列表读取失败 with no server log).
+// Register the prefix route on `webServer` directly and speak the connection
+// envelope ourselves; the envelope is byte-identical across 0.1.2 and 0.1.5:
+//   client → POST {path}/{endpoint}  {type:'client-request', rpcId, method, payload}
+//   host   → {type:'server-response', rpcId, result:{ok:true,value}
+//                                                   |{ok:false,error:{code,message,details}}}
+// `error.details` must be a record — both target host lines reject a failure
+// envelope without it, which would turn every coded error (save conflicts
+// included) into an opaque parse failure on the card.
+// A headless host has no `webServer`, so this inject stays inactive there and
+// the seeder/settings wiring is unaffected.
+const OMDS_RPC_PATH = '/omds';
+
 function wireOmdsRpc(ctx, log) {
-  ctx.inject(['connection', 'agentPresets'], (cctx) => {
+  ctx.inject(['webServer', 'connection', 'agentPresets'], (cctx) => {
     let createQueue = Promise.resolve();
     let settings;
     ctx.inject(['settings'], (sctx) => { settings = sctx.settings; });
@@ -450,26 +571,55 @@ function wireOmdsRpc(ctx, log) {
       createQueue = turn.catch(() => undefined);
       return turn;
     };
+    const dispatch = async (endpoint, payload) => {
+      if (endpoint === 'profile-list') {
+        return { ok: true, value: await endpoints.list() };
+      }
+      if (endpoint === 'profile-create') {
+        return { ok: true, value: await runCreate(() => endpoints.create(payload)) };
+      }
+      if (endpoint === 'profile-save') {
+        return { ok: true, value: await endpoints.save(payload) };
+      }
+      if (endpoint === 'profile-set-default') {
+        return { ok: true, value: await endpoints.setDefault(payload) };
+      }
+      if (endpoint === 'profile-migrate') {
+        return { ok: true, value: await endpoints.migrate(payload) };
+      }
+      throw rpcError('NOT_FOUND', `unknown endpoint ${endpoint}`);
+    };
+    const handler = async (req, res) => {
+      // Same fence the connection bridge applies to /api: reject an untrusted
+      // host/origin, then an unauthenticated browser.
+      const rejection = cctx.connection?.requestRejection?.(req);
+      if (rejection !== void 0) {
+        res.writeHead(rejection);
+        res.end(rejection === 401 ? 'unauthorized' : 'forbidden');
+        return;
+      }
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      let body;
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+      } catch {
+        body = undefined;
+      }
+      const endpoint = typeof body?.method === 'string'
+        ? body.method
+        : String(req.url ?? '').split('?')[0].slice(OMDS_RPC_PATH.length + 1);
+      let result;
+      try {
+        result = await dispatch(endpoint, body?.payload ?? {});
+      } catch (error) {
+        result = { ok: false, error: { code: error?.code ?? 'INTERNAL', message: error?.message ?? String(error), details: {} } };
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ type: 'server-response', rpcId: body?.rpcId, result }));
+    };
     try {
-      cctx.connection.rpc.handle('/omds', async (endpoint, payload = {}, _signal) => {
-        try {
-          if (endpoint === 'profile-list') {
-            return { ok: true, value: await endpoints.list() };
-          }
-          if (endpoint === 'profile-create') {
-            return { ok: true, value: await runCreate(() => endpoints.create(payload)) };
-          }
-          if (endpoint === 'profile-save') {
-            return { ok: true, value: await endpoints.save(payload) };
-          }
-          if (endpoint === 'profile-set-default') {
-            return { ok: true, value: await endpoints.setDefault(payload) };
-          }
-          throw rpcError('NOT_FOUND', `unknown endpoint ${endpoint}`);
-        } catch (error) {
-          return { ok: false, error: { code: error?.code ?? 'INTERNAL', message: error?.message ?? String(error) } };
-        }
-      }, { authority: 'loopback' });
+      cctx.webServer.register({ kind: 'prefix', path: OMDS_RPC_PATH, handler });
       log.info('omds-preset-seeder: /omds RPC registered');
     } catch (error) {
       log.warn(`omds-preset-seeder: /omds RPC registration failed (${error?.message ?? error}); card falls back to bundled-only`);

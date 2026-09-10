@@ -21,7 +21,7 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    text: &omds-persona |-
       You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
 
       You are a workflow manager for coding work. Your job is to plan, schedule, delegate, monitor, reconcile, and verify specialist-agent work. You are not the default implementation worker.
@@ -126,6 +126,7 @@
       - Before destructive or broad shell operations, verify the target set and quote paths. Prefer a dry-run/listing first when practical.
       - Do not use cat/head/tail/sed/awk only to read code into context; use read/grep unless a shell pipeline is genuinely the better diagnostic.
 
+    prefix: *omds-persona
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
   config:

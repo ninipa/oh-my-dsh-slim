@@ -97,6 +97,7 @@ window.__ModuleLoader__.load({
       create: 'profile-create',
       save: 'profile-save',
       setDefault: 'profile-set-default',
+      migrate: 'profile-migrate',
     });
 
     const REQUIRED_PRIMITIVES = ['Button', 'Input', 'Modal', 'Toast', 'IconCheckOutline16', 'IconWarningOutline16'];
@@ -169,6 +170,10 @@ window.__ModuleLoader__.load({
       switchDescription: '切换配置会离开当前编辑内容。要先保存吗？',
       profileUnavailable: '当前宿主未提供配置列表接口，自定义配置暂不可保存。',
       profileListFailed: '配置列表读取失败。',
+      profileMigrationNeeded: '此配置是旧格式（DSH 0.1.5 的 persona 字段已改名），不迁移将无法在新版宿主上加载。迁移会改写 agent.cordis.yml 并保留备份。',
+      profileMigrate: '迁移',
+      profileMigrated: '已迁移该配置',
+      profileMigrateFailed: '迁移失败，请查看宿主日志后重试。',
       profileSaveFailed: '配置保存失败，请检查后重试；当前编辑内容已保留。',
       profileConflict: '配置已被其他窗口修改，请重新加载后再保存。',
       profileDefaultFailed: '新会话默认设置失败，请重试。',
@@ -231,6 +236,10 @@ window.__ModuleLoader__.load({
       switchDescription: 'Switching configurations will leave the current edits. Save them first?',
       profileUnavailable: 'This host does not provide the profile API; custom configurations cannot be saved yet.',
       profileListFailed: 'Failed to read the configuration list.',
+      profileMigrationNeeded: 'This configuration predates the DSH 0.1.5 persona field and would not load on the new host. Migrating rewrites agent.cordis.yml and keeps a backup.',
+      profileMigrate: 'Migrate',
+      profileMigrated: 'Configuration migrated',
+      profileMigrateFailed: 'Migration failed; check the host log and retry.',
       profileSaveFailed: 'Could not save the configuration. Your edits are still here.',
       profileConflict: 'This configuration changed in another window. Reload it before saving again.',
       profileDefaultFailed: 'Could not change the new-session default. Try again.',
@@ -366,6 +375,11 @@ window.__ModuleLoader__.load({
           isDefaultForNewSessions: item.isDefaultForNewSessions === true,
           revision: item.revision,
           config: item.config === undefined ? undefined : profileConfig(item.config),
+          // DSH 0.1.5 reads only the `prefix` persona key: a directory copied
+          // from pre-0.1.5 content still carries `text` alone and would fail its
+          // whole preset mount. The host flags such profiles so the card can
+          // offer the one-click rewrite.
+          needsMigration: item.needsMigration === true,
         };
         const index = profiles.findIndex((profile) => profile.id === next.id);
         if (index >= 0) {
@@ -555,6 +569,7 @@ window.__ModuleLoader__.load({
         create: (payload) => call(PROFILE_RPC_METHODS.create, payload),
         save: (payload) => call(PROFILE_RPC_METHODS.save, payload),
         setDefault: (profileId) => call(PROFILE_RPC_METHODS.setDefault, { profileId }),
+        migrate: (profileId) => call(PROFILE_RPC_METHODS.migrate, { profileId }),
       };
     }
 
@@ -1003,6 +1018,27 @@ window.__ModuleLoader__.load({
         }
       };
 
+      // Rewrite one legacy profile directory into the dual-key persona form so
+      // it mounts on DSH 0.1.5 (the host backs the file up first and is
+      // idempotent, so a double click is harmless).
+      const migrateProfile = async (profileId) => {
+        if (!profileAdapter) {
+          setProfileError(t('profileUnavailable'));
+          return;
+        }
+        setSaving(true);
+        setProfileError(undefined);
+        try {
+          await profileAdapter.migrate(profileId);
+          await refreshRoster();
+          setToast({ text: t('profileMigrated'), icon: React.createElement(ui.IconCheckOutline16, { size: 14 }) });
+        } catch {
+          setProfileError(t('profileMigrateFailed'));
+        } finally {
+          setSaving(false);
+        }
+      };
+
       const commitSelect = (nextId) => {
         setDraft(undefined);
         setProfileError(undefined);
@@ -1121,6 +1157,16 @@ window.__ModuleLoader__.load({
             : null,
         ),
         React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('selectionHint')),
+        selectedProfile?.needsMigration === true
+          ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: color.warn, lineHeight: '16px' } },
+            React.createElement(ui.IconWarningOutline16, { size: 14 }),
+            React.createElement('span', null, t('profileMigrationNeeded')),
+            React.createElement(ui.Button, {
+              variant: 'outline', size: 'sm', disabled: saving || !writable,
+              onClick: () => void migrateProfile(selectedProfile.id),
+            }, t('profileMigrate')),
+          )
+          : null,
         selectedId === NEW_PROFILE_SENTINEL
           ? React.createElement('span', { style: { fontSize: 11, color: color.warn, lineHeight: '16px' } }, t('draftNote'))
           : null,

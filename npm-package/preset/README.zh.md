@@ -9,11 +9,15 @@
 > Persona 文本适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名——详见
 > [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
 
-> **⚠️ DSH 版本要求（0.5.0）**：本版本面向 **DSH 0.1.2-rc.1（最新）**。DSH 在 0.1.2 有重大更新，
-> **oh-my-dsh-slim 0.5.0 不兼容更早的 DSH 版本**——DSH 0.1.1 及以下请继续使用 oh-my-dsh-slim
-> **0.4.0**。若在老宿主上误升级也无妨：插件会检测出版本不符，**完全不动你现有的预设目录**（照常
-> 可用），并在 **设置 → 插件 → oh-my-dsh-slim-compat** 显示提示页。另请注意：**升级后需要重启
-> DSH**（插件代码每进程只挂载一次，仅开新会话不会加载新代码）。
+> **⚠️ DSH 版本支持（0.5.1）**：**DSH 0.1.2-rc.1 ～ 0.1.5-rc.1**，两条宿主线均已端到端实测
+> （0.1.2-rc.1 与 0.1.5-rc.1）。DSH 0.1.1 及以下请继续使用 oh-my-dsh-slim **0.4.0**：插件会
+> 检测出版本不符，**完全不动你现有的预设目录**（照常可用），并在
+> **设置 → 插件 → oh-my-dsh-slim-compat** 显示提示页。另请注意：**升级后需要重启 DSH**
+> （插件代码每进程只挂载一次，仅开新会话不会加载新代码）。
+>
+> **从 0.5.0 升级且宿主为 DSH 0.1.5**：内置预设会自动重播种修复；但**自定义配置**保留自己的目录
+> 内容——若 DSH 0.1.5 无法挂载某份配置，设置卡片会标记它并支持**一键迁移**（就地改写
+> `agent.cordis.yml`，并在旁边保留备份）。你也可以选择重建该配置。
 
 ## 它解决什么问题
 
@@ -47,7 +51,8 @@ orchestrator 遵循严格的委派纪律——派发完独立车道后以简短�
 
 ## 安装
 
-需要 **DSH 0.1.2-rc.1 或更新版本**与 DeepSeek API key（默认模型走 deepseek-official）。
+需要 **DSH 0.1.2-rc.1 ～ 0.1.5-rc.1**（两条线均已实测）与 DeepSeek API key（默认模型走 deepseek-official）。
+更早的 DSH 版本**不受 0.5.1 支持**——DSH 0.1.1 及以下请用 oh-my-dsh-slim 0.4.0（见顶部版本说明）。
 0.5.0 **不支持更早的 DSH 版本**——DSH 0.1.1 及以下请使用 oh-my-dsh-slim 0.4.0（见顶部版本说明）。
 
 **方式 A——插件市场 GUI（推荐）：** 在 DSH web GUI 打开 **设置 → 插件**，在市场里搜索
@@ -159,16 +164,25 @@ service 提供。
 node scripts/t0-validate.mjs .
 
 # 单元测试（配置合并/effort 注入/角色委派契约/subagent_result/settings schema/
-# sandbox 剥离/提前收口账本/播种器/profile RPC/GUI 卡）
+# sandbox 剥离/提前收口账本/播种器/profile RPC//omds 传输层/GUI 卡）
 node scripts/test-config-loader.mjs && node scripts/test-effort-plugin.mjs
 node scripts/test-role-subagent.mjs && node scripts/test-subagent-result.mjs
 node scripts/test-settings-schema.mjs && node scripts/test-sandbox-strip.mjs
 node scripts/test-early-close-context.mjs && node scripts/test-preset-seeder.mjs
 node scripts/test-profile-rpc.mjs && node scripts/test-client-card.mjs
+node scripts/test-omds-rpc.mjs
 
-# 宿主契约探针电池（8 探针 / 9 阶段，零模型）——每次 DSH 升级后必跑。
+# 宿主契约探针电池（9 探针 / 10 阶段，零模型）——每次 DSH 升级后必跑。
 # 自动搭建临时 DSH_HOME（无需凭据）；详见 scripts/TEST-INVENTORY.md
 node scripts/run-host-probes.mjs          # --list / --only <name> / --keep 见 --help
+
+# web 模式传输层探针（零模型）：起真实 web 宿主，验证卡片 /omds 通道（注册/信任栅栏/信封/
+# 一键迁移配置）；`--dsh <安装目录>` 可指向另一个宿主版本做跨版本核验
+node scripts/probe-omds-web.mjs
+
+# 真模型验收（计费）：搭临时 home 让顶层与**每个角色**都指向同一个模型，跑隔离冒烟 + ECC 结算探针；
+# 模型是参数：--provider/--model/--effort（默认 opencode-ds-v41-flash/deepseek-flash @ low）
+node scripts/run-real-models.mjs
 ```
 
 ## 验收任务清单

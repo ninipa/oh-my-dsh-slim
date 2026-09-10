@@ -4,6 +4,34 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.5.1] — 2026-09-10
+
+> **Supported DSH: 0.1.2-rc.1 … 0.1.5-rc.1** — both host lines are verified end to end.
+> **Upgrading requires a DSH restart** (plugin code mounts once per host process).
+
+### Added
+
+- **One-click migration for custom configurations on DSH 0.1.5.** DSH 0.1.3-alpha.2 renamed the
+  persona configuration field (`text` → `prefix`). A configuration directory copied before that
+  change carries the old field alone, and DSH 0.1.5 rejects the whole preset mount. The settings
+  card now flags such a configuration and rewrites the row in place — the original
+  `agent.cordis.yml` is kept as a backup beside it, and re-running the migration is a no-op.
+- `scripts/run-real-models.mjs`: one-command real-model acceptance whose model is a flag
+  (`--provider/--model/--effort`); `scripts/probe-omds-web.mjs`: web-mode transport probe;
+  `scripts/test-omds-rpc.mjs`: transport unit test.
+
+### Fixed
+
+- **DSH 0.1.5: the preset could not mount at all.** The persona row now carries both the `text`
+  and `prefix` keys, so one preset artifact serves the 0.1.2 and 0.1.5 host lines; previously
+  every new 0.1.5 session failed its preset mount.
+- **DSH 0.1.5: the settings card's configuration list is back.** The card's `/omds` channel was
+  registered through an API that 0.1.5 resolves differently, so it silently never appeared — the
+  card still rendered (with working model pickers) while reporting "Failed to read the
+  configuration list" and disabling save.
+- **Coded profile-API errors now reach the card as their real message** (name conflicts and
+  stale-revision conflicts included) instead of an opaque envelope parse failure.
+
 ## [0.5.0] — 2026-09-04
 
 > **Requires DSH 0.1.2-rc.1 or newer.** DSH changed substantially in 0.1.2; this release is
