@@ -108,7 +108,7 @@ if (/roleFromPayload/.test(effortSrc) && !/mimo-v2\.5:\d+/.test(effortSrc)) pass
 const personaTexts = roleRows.map((row) => row.config?.persona ?? '');
 if (personaTexts.some((text) => /web_fetch/.test(text))) fail('persona exposes unavailable web_fetch'); else pass('no persona recommends web_fetch');
 if (personaTexts.every((text) => !/\b(ast_grep_search|apply_patch)\b/.test(text))) pass('personas contain only DSH tool vocabulary'); else fail('persona contains unsupported tool vocabulary');
-for (const file of ['role-subagent.js', 'subagent-result.js', 'web-fetch-gate.js', 'early-close-context.js', 'sandbox-strip.js']) {
+for (const file of ['role-subagent.js', 'subagent-result.js', 'early-close-context.js', 'sandbox-strip.js']) {
   const src = readFileSync(join(presetDir, file), 'utf8');
   if (src.includes('zsh -lic') && src.includes('timeout: 2000') && src.includes("stdio: ['ignore', 'pipe', 'ignore']")) pass(`${file} bounds its shell probes`);
   else fail(`${file} must bound execSync probes (zsh -lic can hang; timeout + silent stderr required)`);
@@ -117,6 +117,14 @@ for (const file of ['role-subagent.js', 'subagent-result.js', 'web-fetch-gate.js
 console.log('\n[5] soft-disabled roles');
 const orchestratorRow = rows.find((row) => row?.id === 'persona');
 const personaBlock = typeof orchestratorRow?.config?.text === 'string' ? orchestratorRow.config.text : '';
+// DSH 0.1.3-alpha.2 split the persona config into `prefix` (+ optional
+// `suffix`), and 0.1.5 removed `text`. The preset ships BOTH keys with the same
+// text so one artifact serves the 0.1.2 line (reads `text`) and the 0.1.5 line
+// (reads `prefix`); dropping either key fails the whole preset mount on that
+// host line (observed 2026-09-10: a `text`-only row broke every new 0.1.5 session).
+const personaPrefix = orchestratorRow?.config?.prefix;
+if (personaBlock.length > 0 && personaPrefix === personaBlock) pass('persona row carries both text and prefix (0.1.2 + 0.1.5 compatible)');
+else fail('persona row must carry BOTH `text` and `prefix` with identical text (DSH 0.1.5 reads `prefix`)');
 const observerRowCfg = rows.find((row) => row?.id === 'tool-subagent-observer')?.config;
 if (!/subagent_observer/.test(personaBlock)) pass('orchestrator persona has no dead reference to subagent_observer'); else fail('orchestrator persona still advertises subagent_observer');
 if (typeof observerRowCfg?.advertisement === 'string' && observerRowCfg.advertisement.includes('@observer')) pass('observer advertisement moved into its role row'); else fail('observer row missing advertisement block');
@@ -149,9 +157,41 @@ const composeSrc = readFileSync(composePath, 'utf8');
 let syncFailures = 0;
 for (const copy of syncCopies) {
   if (!existsSync(copy)) { fail(`composition copy missing: ${copy}`); syncFailures++; continue; }
-  if (readFileSync(copy, 'utf8') !== composeSrc) { fail(`composition out of sync: ${copy}`); syncFailures++; }
+  if (readFileSync(copy, 'utf8') !== composeSrc) { fail(`composition out of sync: ${copy}`); syncFailures++; continue; }
 }
 if (syncFailures === 0) pass('composition copies are in sync');
+
+// 0.5.0-14: the host-DSH compatibility gate must ship everywhere and be wired
+// into every plugin row, so an old host fails fast instead of mounting
+// half-working. The gate module must also be byte-identical across copies.
+const guardRel = join('host-version.js');
+const guardSrc = readFileSync(join(presetDir, guardRel), 'utf8');
+const guardCopies = syncCopies.map((copy) => join(copy, '..', guardRel));
+let guardFailures = 0;
+for (const copy of guardCopies) {
+  if (!existsSync(copy)) { fail(`host-version copy missing: ${copy}`); guardFailures++; continue; }
+  if (readFileSync(copy, 'utf8') !== guardSrc) { fail(`host-version copy out of sync: ${copy}`); guardFailures++; }
+}
+if (guardFailures === 0) pass('host-version gate module in sync across copies');
+const guardedRows = ['role-subagent.js', 'early-close-context.js', 'effort-by-role.js', 'sandbox-strip.js', 'subagent-result.js'];
+let guardWired = 0;
+for (const row of guardedRows) {
+  const src = readFileSync(join(presetDir, row), 'utf8');
+  if (src.includes('assertHostCompatible()')) guardWired++;
+  else fail(`plugin row missing the host gate: ${row}`);
+}
+if (guardWired === guardedRows.length) pass(`host gate wired in all ${guardedRows.length} plugin rows`);
+const npmPkgPath = join(root, 'npm-package', 'package.json');
+if (existsSync(npmPkgPath)) {
+  const npmPkg = JSON.parse(readFileSync(npmPkgPath, 'utf8'));
+  if (npmPkg.engines?.dsh === '>=0.1.2-rc.1 <0.2.0') pass('npm engines.dsh declares the supported host floor');
+  else fail('npm engines.dsh missing or wrong');
+  const peers = npmPkg.peerDependencies ?? {};
+  const requiredPeers = ['@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-mcp-client'];
+  const missing = requiredPeers.filter((name) => !String(peers[name] ?? '').includes('>=0.1.2-rc.1'));
+  if (missing.length === 0) pass('npm peerDependencies declare the DSH floor for every touched host package');
+  else fail(`peerDependencies missing the DSH floor: ${missing.join(', ')}`);
+}
 
 console.log(failures === 0 ? '\nT0: ALL CHECKS PASSED' : `\nT0: ${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

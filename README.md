@@ -205,7 +205,7 @@ node scripts/test-role-subagent.mjs && node scripts/test-subagent-result.mjs
 node scripts/test-settings-schema.mjs && node scripts/test-sandbox-strip.mjs
 node scripts/test-early-close-context.mjs && node scripts/test-preset-seeder.mjs
 node scripts/test-profile-rpc.mjs && node scripts/test-client-card.mjs
-node scripts/test-omds-rpc.mjs
+node scripts/test-omds-rpc.mjs && node scripts/test-host-version.mjs
 
 # Host-contract probe battery (9 probes / 10 phases, zero-model) — run after every DSH upgrade.
 # Bootstraps a scratch DSH_HOME automatically (no credentials needed); see scripts/TEST-INVENTORY.md

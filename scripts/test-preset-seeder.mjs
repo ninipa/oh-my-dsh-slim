@@ -25,6 +25,7 @@ function makeHome(label) {
 
 function runSeeder(home, options = {}) {
   const logs = { info: [], warn: [], error: [] };
+  const injectedDeps = [];
   const ctx = {
     logger: { info: (m) => logs.info.push(m), warn: (m) => logs.warn.push(m), error: (m) => logs.error.push(m) },
     // Default: no settings service ever mounts, so the seeder's ctx.inject
@@ -32,19 +33,21 @@ function runSeeder(home, options = {}) {
     // the callback receives a context whose `.settings` is the service — the
     // same shape the real host hands to ctx.inject(["settings"], …).
     inject: options.settings === undefined ? () => {} : (deps, cb) => {
+      injectedDeps.push(deps.join('+'));
       if (deps.includes('settings')) cb({ settings: options.settings });
     },
   };
-  apply(ctx);
+  apply(ctx, { hostVersion: options.hostVersion });
+  runSeeder.lastInjectedDeps = injectedDeps;
   return logs;
 }
 
 // Settle the seeder's async settings wiring: wait (bounded) until the
 // namespace is registered — everything else the inject callback does (legacy
 // import decision, logging) is synchronous inside that same callback.
-async function waitForRegistration(service, ms = 2000) {
+async function waitForRegistration(service, ms = 2000, ns = 'oh-my-dsh-slim') {
   const deadline = Date.now() + ms;
-  while (service.registered['oh-my-dsh-slim'] === undefined) {
+  while (service.registered[ns] === undefined) {
     if (Date.now() > deadline) return false;
     await new Promise((resolve) => setImmediate(resolve));
   }
@@ -307,6 +310,82 @@ console.log('\n[settings: service absent → seeding unaffected, wiring skipped]
   const logs = runSeeder(home);
   check(existsSync(join(presetDir(home), 'agent.cordis.yml')), 'preset still seeded');
   check(!logs.error.some((m) => m.includes('settings namespace registration failed')), 'no registration errors');
+  rmSync(home, { recursive: true, force: true });
+}
+
+
+console.log('\n[old host: fresh home → seeding skipped, settings channel kept, banner page, no /omds]');
+{
+  const home = makeHome('oldhost-fresh');
+  process.env.DSH_HOME = home;
+  const service = makeSettingsService();
+  const logs = runSeeder(home, { settings: service, hostVersion: '0.1.1' });
+  check(!existsSync(join(home, '.agent-presets', 'oh-my-dsh-slim')), 'preset directory NOT created on an old host');
+  check(logs.warn.some((m) => m.includes('requires DSH >= 0.1.2-rc.1') && m.includes('0.1.1')), 'warns with the floor, the found version and the fix');
+  check(await waitForRegistration(service), 'settings namespace still registered (bundled 0.4.0 preset keeps its channel)');
+  check(await waitForRegistration(service, 2000, 'oh-my-dsh-slim-compat'), 'compatibility banner page registered');
+  check(!runSeeder.lastInjectedDeps.some((d) => d.includes('agentPresets')), 'no /omds wiring on an old host');
+  rmSync(home, { recursive: true, force: true });
+}
+
+console.log('\n[old host: existing 0.4.0 marker → untouched, no backup, no reseed]');
+{
+  const home = makeHome('oldhost-marker');
+  const dir = presetDir(home);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, '.omds-seed.json'), JSON.stringify({ seededVersion: '0.4.0' }));
+  writeFileSync(join(dir, 'sentinel.txt'), '0.4.0 content');
+  process.env.DSH_HOME = home;
+  const logs = runSeeder(home, { hostVersion: '0.1.1' });
+  check(readFileSync(join(dir, 'sentinel.txt'), 'utf8') === '0.4.0 content', 'existing preset untouched');
+  check(markerOf(home)?.seededVersion === '0.4.0', 'marker unchanged');
+  const siblings = readdirSync(join(home, '.agent-presets'));
+  check(!siblings.some((n) => n.includes('.bak-')), 'no backup directories created');
+  check(logs.warn.some((m) => m.includes('left untouched')), 'warns that the directory was left untouched');
+  rmSync(home, { recursive: true, force: true });
+}
+
+console.log('\n[old host: marketplace-update shape (0.4.0 marker + old host) → keeps working preset]');
+{
+  const home = makeHome('oldhost-update');
+  const dir = presetDir(home);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, '.omds-seed.json'), JSON.stringify({ seededVersion: '0.4.0' }));
+  writeFileSync(join(dir, 'agent.cordis.yml'), '0.4.0 composition');
+  process.env.DSH_HOME = home;
+  runSeeder(home, { hostVersion: '0.1.1' });
+  check(readFileSync(join(dir, 'agent.cordis.yml'), 'utf8') === '0.4.0 composition', '0.5.0 files did NOT replace the 0.4.0 composition');
+  check(markerOf(home)?.seededVersion === '0.4.0', 'marker still 0.4.0');
+  rmSync(home, { recursive: true, force: true });
+}
+
+console.log('\n[current host: unchanged behavior]');
+{
+  const home = makeHome('newhost');
+  process.env.DSH_HOME = home;
+  const logs = runSeeder(home, { hostVersion: '0.1.2-rc.1' });
+  check(existsSync(join(presetDir(home), 'agent.cordis.yml')), 'preset seeded normally on a current host');
+  check(markerOf(home)?.seededVersion === BUNDLED_VERSION, 'marker records the bundled version');
+  check(!logs.warn.some((m) => m.includes('requires DSH >= 0.1.2-rc.1')), 'no compatibility warning on a current host');
+  check(!runSeeder.lastInjectedDeps.some((d) => d === undefined), 'inject called with dependency arrays as before');
+  rmSync(home, { recursive: true, force: true });
+}
+
+console.log('\n[undetectable host: fails open (seeds normally)]');
+{
+  const home = makeHome('unknownhost');
+  process.env.DSH_HOME = home;
+  const logs = runSeeder(home, { hostVersion: undefined });
+  check(existsSync(join(presetDir(home), 'agent.cordis.yml')), 'undetectable version fails open and seeds');
+  rmSync(home, { recursive: true, force: true });
+}
+
+console.log('\n[current host: /omds wiring still requested]');
+{
+  const home = makeHome('rpcdeps');
+  process.env.DSH_HOME = home;
+  runSeeder(home, { settings: makeSettingsService(), hostVersion: '0.1.2-rc.1' });
+  check(runSeeder.lastInjectedDeps.some((d) => d.includes('agentPresets')), 'agentPresets inject requested on a current host');
   rmSync(home, { recursive: true, force: true });
 }
 

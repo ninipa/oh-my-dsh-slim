@@ -63,7 +63,7 @@ export function apply(ctx) {
 async function run(ctx) {
   const hostRoot = resolveHostRoot();
   const requireHost = createRequire(join(hostRoot, '@deepseek-ai/dsh/package.json'));
-  const { SessionId } = await import(pathToFileURL(requireHost.resolve('@deepseek-ai/dsh-session')).href);
+  const { SessionId, SessionSeq } = await import(pathToFileURL(requireHost.resolve('@deepseek-ai/dsh-session')).href);
   const { installModelSelection } = await import(pathToFileURL(requireHost.resolve('@deepseek-ai/dsh-agent')).href);
   const { createUserMessage, createAssistantMessage } = await import(pathToFileURL(requireHost.resolve('@deepseek-ai/dsh-llm')).href);
   await ctx.get('loader')?.await();
@@ -90,12 +90,13 @@ async function run(ctx) {
     sessionId: SessionId(`session-${randomUUID()}`),
     meta: { cwd: process.cwd() },
     agentOptions: { provider: selection?.provider, model: selection?.model },
-    setup: async (agentCtx) => {
+    setup: async (agentCtx, agent) => {
       installModelSelection(agentCtx, { current: selection, assembled: void 0 });
       await presets.mount(agentCtx);
       // Scoped registration shadows globals: look up through the AGENT scope
       // (tools.get without scopeKey returns the global view -> undefined).
-      let found = agentCtx.tools?.get?.('subagent_result', agentCtx.agent);
+      // 0.1.5 removed `ctx.agent`; setup's second argument is the Agent.
+      let found = agentCtx.tools?.get?.('subagent_result', agent);
       if (found === undefined) found = agentCtx.tools?.get?.('subagent_result');
       if (found === undefined) {
         // Some registry shapes need an explicit view; report absence clearly.
@@ -126,6 +127,9 @@ async function run(ctx) {
   const assistantTurn = (text, step = 1) => ({
     turn: 1,
     step,
+    // V3 settlement shape: an assistant/message must carry its embedded
+    // provider stream (an empty one is a valid shape for a synthetic turn).
+    stream: [],
     message: createAssistantMessage({
       content: [{ type: 'text', text }],
       source: { provider: selection.provider, model: selection.model },
@@ -144,10 +148,7 @@ async function run(ctx) {
     });
     child.append('user/message', userTurn(`${label} question`), { surfaceOp: 'append' });
     if (withFinal) {
-      child.append('assistant/message', assistantTurn(`${label} FINAL ANSWER ${randomUUID()}`), {
-        surfaceOp: 'append',
-        sourceEventSeqs: [],
-      });
+      child.append('assistant/message', assistantTurn(`${label} FINAL ANSWER ${randomUUID()}`), { surfaceOp: 'append' });
     }
     return { id, child, label };
   }
@@ -158,18 +159,19 @@ async function run(ctx) {
   await sessions.flush(liveNoMsg.child);
   const foreign = makeChild('foreign', { withFinal: true, parentFor: SessionId('session-someone-else') });
   await sessions.flush(foreign.child);
-  // Cold child: flushed to persistence, then detached so reads must fall back
-  // to session persistence (same construction as probe-session-query).
+  // Cold child: 0.1.5 binds the persistence write handle to the agent
+  // lifecycle, so write the synthetic session through the persistence seam
+  // (create/append/close) — reads must then fall back to the persisted log.
   const coldId = SessionId(`session-${randomUUID()}`);
-  const cold = sessions.prepare(coldId, {
+  const coldSeed = sessions.prepare(coldId, {
     meta: { cwd: process.cwd(), parentSession: parentId, origin: 'subagent', delegationDepth: 1 },
   });
-  const detach = sessions.enter(cold);
-  sessions.announce(cold);
-  cold.append('user/message', userTurn('cold question'), { surfaceOp: 'append' });
-  cold.append('assistant/message', assistantTurn('cold FINAL ANSWER'), { surfaceOp: 'append', sourceEventSeqs: [] });
-  await sessions.flush(cold);
-  detach();
+  const coldWriter = await ctx.get('sessionPersistence').create(coldSeed.header);
+  await coldWriter.append([
+    { type: 'user/message', seq: SessionSeq(0), time: Date.now(), data: userTurn('cold question'), surfaceOp: 'append' },
+    { type: 'assistant/message', seq: SessionSeq(1), time: Date.now(), data: assistantTurn('cold FINAL ANSWER'), surfaceOp: 'append' },
+  ]);
+  await coldWriter.close();
   await new Promise((resolve) => setTimeout(resolve, 300));
 
   const execCtx = { agent: parent };

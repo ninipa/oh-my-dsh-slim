@@ -170,7 +170,7 @@ node scripts/test-role-subagent.mjs && node scripts/test-subagent-result.mjs
 node scripts/test-settings-schema.mjs && node scripts/test-sandbox-strip.mjs
 node scripts/test-early-close-context.mjs && node scripts/test-preset-seeder.mjs
 node scripts/test-profile-rpc.mjs && node scripts/test-client-card.mjs
-node scripts/test-omds-rpc.mjs
+node scripts/test-omds-rpc.mjs && node scripts/test-host-version.mjs
 
 # 宿主契约探针电池（9 探针 / 10 阶段，零模型）——每次 DSH 升级后必跑。
 # 自动搭建临时 DSH_HOME（无需凭据）；详见 scripts/TEST-INVENTORY.md

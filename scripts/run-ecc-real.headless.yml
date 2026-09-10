@@ -1,0 +1,21 @@
+# Real-model ECC settlement-ordering probe (PLAN-DELEGATION-LIFECYCLE §4.5,
+# NOTE: run through scripts/run-host-probes.mjs (substitutes __WORKSPACE__); direct copy-paste needs the token replaced.
+# real-headless form): stock headless tree + preset mounted on the runner
+# agent; the probe drives ONE real delegation (subagent_explorer), then a
+# settlement happens for real (child finish -> steer). ECC_DEBUG=1 makes the
+# early-close-context plugin log its rendered running-block per prompt
+# assembly to stderr; ordering of those renders vs the real inbox events is
+# verified afterward by scripts/analyze-ecc-real.mjs.
+# Usage:
+#   DSH_HOME=<scratch with .credentials.yaml + preset> ECC_DEBUG=1 \
+#     dsh --profile headless --patch scripts/run-ecc-real.headless.yml probe
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: oh-my-dsh-slim
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: run-ecc-real
+      name: file://__WORKSPACE__/scripts/run-ecc-real.js

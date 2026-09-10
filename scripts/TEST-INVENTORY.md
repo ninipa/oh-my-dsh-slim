@@ -19,6 +19,7 @@
 | `node scripts/test-client-card.mjs` | GUI 卡 client bundle（mock window/react）注册契约/degrade/write-planner + **model-scoped effort（flash+medium 回归：选项按 catalog、none 置顶、mismatch 拦截）** |
 | `node scripts/test-preset-seeder.mjs` | npm seeder 状态机全分支（真 temp dir） |
 | `node scripts/test-profile-rpc.mjs` | /omds profile 端点全路径（mock roster + 真 temp dir） |
+| `node scripts/test-omds-rpc.mjs` | /**omds 传输层**契约（真 webServer 桩）：注册形态（`/omds` 前缀路由）、信任栅栏、连接信封（rpcId 回显 / ok-value / 错误码 + `details` 记录）。回归目标：2026-09-10 的 `connection.rpc.handle` 静默失效 |
 
 ## L1 真宿主契约电池（零模型）
 
@@ -47,6 +48,7 @@ runner 运行时替换（直接拷贝 overlay 单跑前必须自行替换 token�
 | 资产 | 用途 | 运行约束 |
 |---|---|---|
 | `probe-profile-patch.headless.yml` + `probe-profile-snapshots.js` | 多预设快照隔离（含自定义 profile 副本） | 需 scratch home 含多个 preset 目录，手动跑 |
+| `probe-omds-web.mjs` | **web 模式 /omds 传输层**（真实 web 宿主：注册 405→401、token 换 cookie 后 200 + roster、错误信封）；`--dsh <安装目录>` 可指向任意宿主版本做跨版本核验 | 自建隔离 web home（**无凭据、零模型**、自动清理）；对端版本安装示例见脚本头注释。2026-09-10 实测 0.1.2-rc.1 与 0.1.5-rc.1 均 PASS。**headless 电池看不到这条缝**（headless 无 webServer） |
 | `probe-spawn-child-webmode-patch.headless.yml` | headless 复刻 web 行状态后的 child join | 与 web 行状态同步维护，手动跑 |
 | `probe-spawn-child-real-home.web.yml` / `probe-spawn-child-webmode*.web.yml` / `probe-resume-child-patch.web.yml` | 生产 home / web profile 只读探针（resume 跨进程两阶段） | **针对真实 home**，零模型只读，按各文件头说明手动执行，严禁自动化 |
 
@@ -55,6 +57,7 @@ runner 运行时替换（直接拷贝 overlay 单跑前必须自行替换 token�
 | 资产 | 用途 | 说明 |
 |---|---|---|
 | `scripts/run-ecc-real.js` + `run-ecc-real.headless.yml` + `analyze-ecc-real.mjs` | ECC settle 时序端到端 | scratch home 需 `.credentials.yaml`（runner 的 --creds）；`ECC_DEBUG=1`；分析器判定**单调收敛**语义；两轮 PASS 记录（2026-09-04，out/ecc-probe-2026-09-04/） |
+| `scripts/run-real-models.mjs` | **一键真模型验收**：自建 scratch home（settings 默认模型 + 六个角色全部指向同一模型/effort）→ 跑隔离冒烟（逐条断言 `agent/request` 的 provider/model/effort）+ ECC 探针 + 分析器 | 模型是**参数**：`--provider/--model/--effort`（或 `OMDS_REAL_*` 环境变量），默认 `opencode-ds-v41-flash/deepseek-flash @ low`；provider 的 baseURL/api/compat/headers 从源 home 的 settings 原样搬运（含网关要求的 `x-opencode-session`）。需源 home 的 `settings.yaml` + `.credentials.yaml`。2026-09-10 实测两套模型（新 provider@low、`deepseek-official/deepseek-v4-flash`@high）均 PASS |
 | GUI-TEST-TASKS.md + 各期 GUI 人工记录 | GUI 面（client 卡、真实路由/委派/整合） | 结构性空档：web 宿主无法 headless，靠人工 T3 |
 
 ## 历史资产（保留供追溯，勿当回归网）

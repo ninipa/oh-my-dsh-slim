@@ -149,7 +149,7 @@ async function run(ctx) {
   // in-flight load instead of racing it.
   const { installModelSelection } = await import(require.resolve('@deepseek-ai/dsh-agent'));
   const { createAssistantMessage, createUserMessage } = await import(require.resolve('@deepseek-ai/dsh-llm'));
-  const { SessionId } = await import(require.resolve('@deepseek-ai/dsh-session'));
+  const { SessionId, SessionSeq } = await import(require.resolve('@deepseek-ai/dsh-session'));
 
   await ctx.get('loader')?.await();
   const report = { app: {}, agentScope: {}, live: {}, cold: {}, errors: {} };
@@ -217,6 +217,9 @@ async function run(ctx) {
   const assistantTurn = (text) => ({
     turn: 1,
     step: 1,
+    // V3 settlement shape: an assistant/message must carry its embedded
+    // provider stream (an empty one is a valid shape for a synthetic turn).
+    stream: [],
     message: createAssistantMessage({
       content: [{ type: 'text', text }],
       source: { provider: selection.provider, model: selection.model },
@@ -229,21 +232,23 @@ async function run(ctx) {
     meta: { cwd: process.cwd(), parentSession: parentId, origin: 'subagent', delegationDepth: 1 },
   });
   liveChild.append('user/message', userTurn(), { surfaceOp: 'append' });
-  liveChild.append('assistant/message', assistantTurn('PROBE_FINAL_ANSWER live'), { surfaceOp: 'append', sourceEventSeqs: [] });
+  liveChild.append('assistant/message', assistantTurn('PROBE_FINAL_ANSWER live'), { surfaceOp: 'append' });
   await sessions.flush(liveChild);
 
-  // Cold child: flushed to persistence, then detached from the store so the
-  // same reads must resolve through the persisted log instead.
+  // Cold child: 0.1.5 binds the persistence write handle to the agent
+  // lifecycle, so a synthetic session never reaches the log on its own —
+  // write it through the persistence seam (create/append/close) and let the
+  // reads below resolve from the persisted log alone.
   const coldChildId = SessionId(`session-${randomUUID()}`);
-  const coldChild = sessions.prepare(coldChildId, {
+  const coldSeed = sessions.prepare(coldChildId, {
     meta: { cwd: process.cwd(), parentSession: parentId, origin: 'subagent', delegationDepth: 1 },
   });
-  const detachCold = sessions.enter(coldChild);
-  sessions.announce(coldChild);
-  coldChild.append('user/message', userTurn(), { surfaceOp: 'append' });
-  coldChild.append('assistant/message', assistantTurn('PROBE_FINAL_ANSWER cold'), { surfaceOp: 'append', sourceEventSeqs: [] });
-  await sessions.flush(coldChild);
-  detachCold();
+  const coldWriter = await ctx.get('sessionPersistence').create(coldSeed.header);
+  await coldWriter.append([
+    { type: 'user/message', seq: SessionSeq(0), time: Date.now(), data: userTurn(), surfaceOp: 'append' },
+    { type: 'assistant/message', seq: SessionSeq(1), time: Date.now(), data: assistantTurn('PROBE_FINAL_ANSWER cold'), surfaceOp: 'append' },
+  ]);
+  await coldWriter.close();
   await new Promise((resolve) => setTimeout(resolve, 300));
 
   report.live.readSurface = summarizeSurface(await settle(query.readSurface(liveChildId)));

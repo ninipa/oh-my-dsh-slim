@@ -1,14 +1,8 @@
-# Zero-cost model-modality probe: boots the tree and lists every provider's
-# models with their declared inputModalities (text/image/...). Never sends a
-# model request. Run this FIRST after any DSH upgrade.
-#
-# BEFORE RUNNING: replace REPLACE_WITH_REPO_ABS_PATH with this repo's absolute
-# path (see probe-patch.headless.yml for a sed one-liner).
-#
-# Usage:
-#   DSH_HOME=<scratch> dsh --profile headless --patch scripts/probe-capabilities-patch.headless.yml probe
+# Zero-cost model-modality probe: boots the tree, lists every provider's
+# NOTE: run through scripts/run-host-probes.mjs (substitutes __WORKSPACE__); direct copy-paste needs the token replaced.
+# models with declared inputModalities, exits without any model request.
 - id: headless-runner
   disabled: true
 - insert:
     - id: probe-model-capabilities
-      name: file://REPLACE_WITH_REPO_ABS_PATH/scripts/probe-model-capabilities.js
+      name: file://__WORKSPACE__/scripts/probe-model-capabilities.js

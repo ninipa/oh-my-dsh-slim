@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   makeProfileEndpoints,
+  migratePersonaComposition,
+  personaMigrationNeeded,
   profileIdForDisplayName,
   isCustomProfileId,
 } from '../npm-package/lib/index.js';
@@ -264,6 +266,75 @@ const VALID_CONFIG = { preset: 'my-dsh-normal', roles: { fixer: { model: 'custom
   // the RPC contract).
   const listed = await endpoints.list();
   check(JSON.stringify(listed.profiles.find((profile) => profile.id === id)?.config) === JSON.stringify({}), 'create: empty config round-trips through the roster');
+  rmSync(home, { recursive: true, force: true });
+}
+
+// ------------------------------------------------- 0.1.5 persona migration
+// A profile directory created from pre-0.1.5 content carries a `text:`-only
+// persona row; DSH 0.1.5 reads only `prefix`, so that directory fails its WHOLE
+// preset mount and can never fix itself (the seeder re-seeds the bundled
+// directory only). The migration is text-level, backed up, and idempotent.
+const LEGACY_COMPOSITION = [
+  '# identity',
+  '- id: persona',
+  "  name: '@deepseek-ai/dsh-persona'",
+  '  config:',
+  '    text: |-',
+  '      You are a coding agent.',
+  '',
+  '- id: agent-instructions',
+  '  name: X',
+  '',
+].join('\n');
+const DUAL_COMPOSITION = LEGACY_COMPOSITION
+  .replace('    text: |-', '    text: &omds-persona |-')
+  .replace('- id: agent-instructions', '    prefix: *omds-persona\n- id: agent-instructions');
+
+{
+  check(personaMigrationNeeded(LEGACY_COMPOSITION) === true, 'personaMigrationNeeded: a text-only persona row is legacy');
+  check(personaMigrationNeeded(DUAL_COMPOSITION) === false, 'personaMigrationNeeded: a dual-key row needs nothing');
+  check(personaMigrationNeeded('rows: []\n') === false, 'personaMigrationNeeded: a composition without a persona row is left alone');
+  const migratedText = migratePersonaComposition(LEGACY_COMPOSITION);
+  check(migratedText.changed === true
+    && /text: &omds-persona \|-/.test(migratedText.text)
+    && /^\s+prefix: \*omds-persona$/m.test(migratedText.text),
+  'migratePersonaComposition: anchors text and adds the prefix alias');
+  check(migratePersonaComposition(DUAL_COMPOSITION).changed === false, 'migratePersonaComposition: idempotent');
+}
+
+{
+  const home = makeHome('migrate');
+  seedBundled(home);
+  const legacyId = 'profile-legacy-aaa111';
+  const legacyDir = join(home, legacyId);
+  mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(join(legacyDir, 'agent.cordis.yml'), LEGACY_COMPOSITION);
+  writeFileSync(join(legacyDir, 'preset.yml'), renderMetaYaml('旧配置', 'legacy profile'));
+  const roster = makeRoster(home);
+  const endpoints = makeProfileEndpoints({ agentPresets: roster, getSettings: () => undefined, log: {} });
+
+  const listed = await endpoints.list();
+  check(listed.profiles.find((profile) => profile.id === legacyId)?.needsMigration === true, 'list: a legacy custom profile is flagged needsMigration');
+  check(listed.profiles.find((profile) => profile.id === BUNDLED)?.needsMigration === undefined, 'list: the bundled profile carries no migration flag');
+
+  const migrated = await endpoints.migrate({ profileId: legacyId });
+  check(migrated.changed === true && typeof migrated.backup === 'string', 'migrate: rewrites the composition and reports its backup');
+  check(readFileSync(join(legacyDir, 'agent.cordis.yml'), 'utf8') === migratePersonaComposition(LEGACY_COMPOSITION).text,
+    'migrate: the file content matches the pure migration');
+  check(readFileSync(join(legacyDir, 'agent.cordis.yml.bak-pre-015-persona'), 'utf8') === LEGACY_COMPOSITION,
+    'migrate: the original composition is backed up beside it');
+
+  const again = await endpoints.migrate({ profileId: legacyId });
+  check(again.changed === false, 'migrate: idempotent on an already dual-key composition');
+  const after = await endpoints.list();
+  check(after.profiles.find((profile) => profile.id === legacyId)?.needsMigration === false, 'list: the flag clears after migration');
+
+  let bundledError;
+  try { await endpoints.migrate({ profileId: BUNDLED }); } catch (error) { bundledError = error; }
+  check(bundledError?.code === 'PROFILE_UNSUPPORTED', 'migrate: the bundled profile is refused (the seeder owns it)');
+  let missingError;
+  try { await endpoints.migrate({ profileId: 'profile-does-not-exist' }); } catch (error) { missingError = error; }
+  check(missingError?.code === 'PROFILE_NOT_FOUND', 'migrate: an unknown profile reports NOT_FOUND');
   rmSync(home, { recursive: true, force: true });
 }
 
