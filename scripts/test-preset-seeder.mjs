@@ -277,7 +277,9 @@ console.log('\n[settings: existing settings.yaml section wins, legacy JSON kept]
 console.log('\n[settings: schema-invalid legacy JSON kept with a warning]');
 {
   const home = makeHome('settings-invalid');
-  const path = legacyJson(home, { presets: { 'my-dsh-normal': { oracle: { effort: 'bogus' } } } });
+  // "Invalid" here means malformed: effort ids are adapter-owned and open-ended,
+  // so the schema checks the token's shape, not its membership (2026-09-18).
+  const path = legacyJson(home, { presets: { 'my-dsh-normal': { oracle: { effort: 'high!' } } } });
   process.env.DSH_HOME = home;
   const service = makeSettingsService();
   const logs = runSeeder(home, { settings: service });

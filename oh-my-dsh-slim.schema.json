@@ -30,7 +30,7 @@
         "enabled": { "type": "boolean", "description": "Mount this role's tool (default true). observer is force-disabled in this preset version and ignores enabled:true." },
         "provider": { "type": "string" },
         "model": { "type": "string" },
-        "effort": { "enum": ["none", "off", "low", "medium", "high", "max"] },
+        "effort": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$", "description": "Reasoning effort token from the model catalog (e.g. none/off/low/medium/high/xhigh/max). Shape-checked here; whether the chosen model accepts it is checked at runtime against that model's declared efforts." },
         "tools": { "type": "array", "items": { "type": "string" } },
         "deny": { "type": "array", "items": { "type": "string" } },
         "mcps": { "type": "array", "items": { "type": "string" } },

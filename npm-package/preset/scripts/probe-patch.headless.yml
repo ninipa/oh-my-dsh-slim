@@ -1,15 +1,11 @@
-# Zero-cost host probe overlay: mounts the preset roster, replaces the stock
-# headless runner with scripts/probe-session-query.js, validates every role's
-# toolFilter against the real registry ([compat]) and exercises
-# sessionQuery reads — all without sending a model request.
-#
-# BEFORE RUNNING: replace the REPLACE_WITH_REPO_ABS_PATH placeholder below
-# with this repo's absolute path, e.g.:
-#   sed -i '' 's|REPLACE_WITH_REPO_ABS_PATH|'"$PWD"'|' scripts/probe-patch.headless.yml
-# (Linux: sed -i instead of sed -i '')
-#
-# Usage (scratch home, NOT your production one):
-#   cp -R <repo> "$DSH_HOME/.agent-presets/oh-my-dsh-slim"   (preset must be installed)
+# Zero-cost host API probe overlay (PLAN-BACKGROUND-DELEGATION 方案 4 步骤 0):
+# NOTE: run through scripts/run-host-probes.mjs (substitutes __WORKSPACE__); direct copy-paste needs the token replaced.
+# disable the stock headless runner and replace it with probe-session-query,
+# which boots the composition, probes ctx.sessionQuery / subagents APIs,
+# validates the installed preset's role toolFilters against the real registry
+# (compat section), and exits without ever sending a model request.
+# Run with a scratch DSH_HOME that has the preset installed:
+#   cp -r <preset> $DSH_HOME/.agent-presets/oh-my-dsh-slim   (no .git)
 #   DSH_HOME=<scratch> dsh --profile headless --patch scripts/probe-patch.headless.yml probe
 - insert:
     - id: agent-presets
@@ -20,4 +16,4 @@
   disabled: true
 - insert:
     - id: probe-session-query
-      name: file://REPLACE_WITH_REPO_ABS_PATH/scripts/probe-session-query.js
+      name: file://__WORKSPACE__/scripts/probe-session-query.js

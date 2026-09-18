@@ -9,8 +9,8 @@
 > Persona 文本适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名——详见
 > [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
 
-> **⚠️ DSH 版本支持（0.5.1）**：**DSH 0.1.2-rc.1 ～ 0.1.5-rc.1**，两条宿主线均已端到端实测
-> （0.1.2-rc.1 与 0.1.5-rc.1）。DSH 0.1.1 及以下请继续使用 oh-my-dsh-slim **0.4.0**：插件会
+> **⚠️ DSH 版本支持（0.5.2）**：**DSH 0.1.2-rc.1 ～ 0.1.5-rc.2**，两条宿主线均已端到端实测
+> （0.1.2 线；0.1.5 线的 rc.1 与 rc.2）。DSH 0.1.1 及以下请继续使用 oh-my-dsh-slim **0.4.0**：插件会
 > 检测出版本不符，**完全不动你现有的预设目录**（照常可用），并在
 > **设置 → 插件 → oh-my-dsh-slim-compat** 显示提示页。另请注意：**升级后需要重启 DSH**
 > （插件代码每进程只挂载一次，仅开新会话不会加载新代码）。
@@ -51,8 +51,8 @@ orchestrator 遵循严格的委派纪律——派发完独立车道后以简短�
 
 ## 安装
 
-需要 **DSH 0.1.2-rc.1 ～ 0.1.5-rc.1**（两条线均已实测）与 DeepSeek API key（默认模型走 deepseek-official）。
-更早的 DSH 版本**不受 0.5.1 支持**——DSH 0.1.1 及以下请用 oh-my-dsh-slim 0.4.0（见顶部版本说明）。
+需要 **DSH 0.1.2-rc.1 ～ 0.1.5-rc.2**（两条线均已实测）与 DeepSeek API key（默认模型走 deepseek-official）。
+更早的 DSH 版本**不受 0.5.2 支持**——DSH 0.1.1 及以下请用 oh-my-dsh-slim 0.4.0（见顶部版本说明）。
 0.5.0 **不支持更早的 DSH 版本**——DSH 0.1.1 及以下请使用 oh-my-dsh-slim 0.4.0（见顶部版本说明）。
 
 **方式 A——插件市场 GUI（推荐）：** 在 DSH web GUI 打开 **设置 → 插件**，在市场里搜索
@@ -114,9 +114,11 @@ git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-
   （`advanced.roles.<roleId>`）
 - **思考强度取值**：`none` = 完全不发送 `reasoningEffort` 参数（适用于不支持思考强度的模型，
   如本地 LLM）；`off` = 发送 `reasoningEffort: "off"` 明确关闭推理（模型需支持该参数）。
-  其余档位（`low`/`medium`/`high`/`max` …）**按所选模型收敛**：适配器只接受该模型声明支持的
-  档位（例如 DeepSeek 适配器接受 `off/low/high/max`、拒绝 `medium`），不支持的档位在请求时
-  显式报错。GUI 卡片的 effort 下拉即按各模型声明集合生成，越界值行内警告并阻止保存
+  其余档位（`low`/`medium`/`high`/`max`/`xhigh` …）**按所选模型收敛且集合开放**：档位 id 由各
+  适配器自己定义，因此配置侧接受任何形状合法的档位 token（在这台机器上能保存的配置，换到另一台
+  也依然合法），是否被该模型接受在委派时判定——不支持的档位在第一次委派即显式报错，并列出该模型
+  声明的档位与其适配器默认值。GUI 卡片的 effort 下拉按各模型声明集合生成，显式越界值行内警告并
+  阻止保存
 - **模型名校验**：委派时按你在「设置-模型」导入的 provider 目录实时校验——填了不存在的模型，
   第一次委派即报错并列出全部可用模型（含 vision-capable 子集），不会静默失败
 - **observer 锁定**：`observer.enabled: true` 会被忽略并警告（原因见上）

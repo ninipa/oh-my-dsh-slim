@@ -153,11 +153,12 @@ async function run(ctx) {
       sessionId: SessionId(`session-${randomUUID()}`),
       meta: { cwd: process.cwd(), parentSession: 'session-omds-probe-parent', delegationDepth: 1, origin: 'subagent' },
       agentOptions: { provider: seed.provider, model: seed.model },
-      setup: async (agentCtx) => {
+      setup: async (agentCtx, agent) => {
         installModelSelection(agentCtx, { current: selection, assembled: void 0 });
         await presets.mount(agentCtx);
         try {
-          agentCtx.agent.session.append('subagent/descriptor', { persona: 'oh-my-dsh-slim-role:fixer' });
+          // 0.1.5 removed `ctx.agent`; setup's second argument is the Agent.
+          agent.session.append('subagent/descriptor', { persona: 'oh-my-dsh-slim-role:fixer' });
         } catch (error) {
           facts.descriptorAppendFailed = error instanceof Error ? error.message : String(error);
         }

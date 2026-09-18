@@ -4,7 +4,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, resetConfigForTests } from '../config-loader.js';
+import { loadConfig, resetConfigForTests, validateConfigDocument } from '../config-loader.js';
 
 // Expected values come from the bundled defaults (single source of truth), so
 // the test stays valid across the private/public defaults forks.
@@ -276,5 +276,52 @@ try {
   if (previousHome === undefined) delete process.env.DSH_HOME;
   else process.env.DSH_HOME = previousHome;
   resetConfigForTests();
+}
+
+// ── effort tokens: shape, not vocabulary (2026-09-18) ────────────────────────
+// Effort ids are adapter-owned and open-ended (the host brands them as an opaque
+// id), so a fixed list in the writer is a snapshot: gating on it rejected
+// intelalloc's `xhigh` while the model catalog offered it. Whether a model
+// accepts a level is decided at runtime against that model's declared efforts
+// (effort-by-role.js); the writers only reject tokens that are not tokens.
+{
+  const doc = (effort) => ({ preset: 'p', presets: { p: { oracle: { effort } } } });
+  for (const token of ['xhigh', 'minimal', 'UlTra-2', 'off']) {
+    try {
+      validateConfigDocument(doc(token));
+      console.log(`  PASS  well-formed effort "${token}" passes the document validator`);
+    } catch (error) {
+      throw new Error(`well-formed effort "${token}" was rejected: ${error.message}`);
+    }
+  }
+  for (const bad of ['', 'x high', 'high!', 'a'.repeat(33), 42, null]) {
+    let threw = false;
+    try { validateConfigDocument(doc(bad)); } catch { threw = true; }
+    if (!threw) throw new Error(`malformed effort ${JSON.stringify(bad)} was accepted by the document validator`);
+    console.log(`  PASS  malformed effort ${JSON.stringify(bad)} is rejected`);
+  }
+
+  const tokenHome = mkdtempSync(join(tmpdir(), 'omds-effort-token-'));
+  const tokenPath = join(tokenHome, 'config.json');
+  writeFileSync(tokenPath, JSON.stringify({ preset: 'p', presets: { p: { oracle: { effort: 'xhigh' } } } }));
+  const previousEnv = process.env.OH_MY_DSH_SLIM_CONFIG;
+  const previousHome2 = process.env.DSH_HOME;
+  process.env.OH_MY_DSH_SLIM_CONFIG = tokenPath;
+  process.env.DSH_HOME = tokenHome;
+  resetConfigForTests();
+  try {
+    const merged = loadConfig({});
+    if (merged.roles.oracle.effort !== 'xhigh') {
+      throw new Error(`loader dropped the configured effort: ${JSON.stringify(merged.roles.oracle.effort)}`);
+    }
+    console.log('  PASS  a catalog-declared level (xhigh) merges through the loader');
+  } finally {
+    if (previousEnv === undefined) delete process.env.OH_MY_DSH_SLIM_CONFIG;
+    else process.env.OH_MY_DSH_SLIM_CONFIG = previousEnv;
+    if (previousHome2 === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previousHome2;
+    resetConfigForTests();
+    rmSync(tokenHome, { recursive: true, force: true });
+  }
 }
 console.log('\nCONFIG LOADER: ALL CHECKS PASSED');

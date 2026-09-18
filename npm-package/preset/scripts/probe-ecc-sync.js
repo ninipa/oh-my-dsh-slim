@@ -121,7 +121,7 @@ async function run(ctx) {
     sessionId: SessionId(`session-${randomUUID()}`),
     meta: { cwd: process.cwd() },
     agentOptions: { provider: selection?.provider, model: selection?.model },
-    setup: async (agentCtx) => {
+    setup: async (agentCtx, agent) => {
       installModelSelection(agentCtx, { current: selection, assembled: void 0 });
       let mountError;
       try {
@@ -138,7 +138,7 @@ async function run(ctx) {
         captured.push({
           at: Date.now(),
           agentId: subject?.id,
-          sessionId: agentCtx.agent?.session?.id,
+          sessionId: agent.session?.id,
           source: message?.source === void 0 ? null : { ...message.source },
           hasContent: Array.isArray(message?.content),
         });
@@ -221,7 +221,9 @@ async function run(ctx) {
   try {
     await sessions.flush(agent.session);
   } catch {}
-  for (const event of agent.session.events ?? []) {
+  // 0.1.2-alpha.4 replaced `session.events` with snapshotEvents(); this field
+  // is informational only (the verdict never reads it).
+  for (const event of agent.session.snapshotEvents()) {
     if (event.type !== 'agent/inbox/spliced') continue;
     for (const msg of event?.data?.inserted ?? []) {
       const source = msg?.source;

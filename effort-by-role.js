@@ -33,6 +33,71 @@ function isSubagent(payload) {
 // config-loader falls back to the legacy JSON file.
 const inject = ['settings'];
 
+// Whether a model accepts a configured effort is a MODEL fact, not a preset
+// fact: effort ids are adapter-owned and open-ended, so the configuration
+// writers check shape only. This waterfall is the one place that knows the
+// configured level and the exact route it will be sent to, so a level the
+// model does not declare fails the delegation with a readable error instead of
+// dying inside the adapter.
+//
+// Only a verdict we could actually derive is cached (accepted, or rejected
+// with an Error). "Could not judge" — no llm service yet, unregistered
+// provider, unknown model — is NOT cached, so a host that is still coming up,
+// or a provider the user imports later, gets a real answer on the next
+// request. Unjudgeable also fails OPEN, matching the host's own rule that
+// catalog absence is not rejection ("consumers must not turn absence into
+// request rejection", dsh-llm).
+const effortVerdicts = new Map();
+
+function llmService(ctx) {
+  try {
+    const llm = ctx.get('llm');
+    return llm !== undefined && typeof llm.resolveModel === 'function' ? llm : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resolves to `{ error: Error | null }` when judged, `undefined` when not. */
+function effortVerdict(ctx, provider, model, effort) {
+  const key = `${provider}\u0000${model}\u0000${effort}`;
+  const cached = effortVerdicts.get(key);
+  if (cached !== undefined) return cached;
+  const llm = llmService(ctx);
+  if (llm === undefined) return Promise.resolve(undefined);
+  return (async () => {
+    try {
+      const info = await llm.resolveModel(provider, model);
+      const declared = info?.reasoning?.efforts;
+      if (!Array.isArray(declared)) return undefined;
+      const ids = declared.map((entry) => entry?.id).filter((id) => typeof id === 'string');
+      if (ids.length === 0 || ids.includes(effort)) return { error: null };
+      const fallback = typeof info?.reasoning?.defaultEffort === 'string'
+        ? `; adapter default: "${info.reasoning.defaultEffort}"`
+        : '';
+      return {
+        error: new Error(
+          `reasoning effort "${effort}" is not offered by "${provider}/${model}".`
+          + ` Declared efforts: ${ids.join(', ')}${fallback}.`
+          + ` Fix the role's effort in the preset configuration (Settings → Plugins → oh-my-dsh-slim).`,
+        ),
+      };
+    } catch {
+      return undefined;
+    }
+  })().then((verdict) => {
+    if (verdict !== undefined) effortVerdicts.set(key, Promise.resolve(verdict));
+    return verdict;
+  });
+}
+
+async function assertEffortDeclared(ctx, provider, model, effort) {
+  // A route we cannot name here is not a level we can judge: pass through.
+  if (typeof provider !== 'string' || typeof model !== 'string') return;
+  const verdict = await effortVerdict(ctx, provider, model, effort);
+  if (verdict?.error instanceof Error) throw verdict.error;
+}
+
 export function apply(ctx) {
   ctx.on('agent/request', async (payload, next) => {
     const resolved = await next();
@@ -49,9 +114,13 @@ export function apply(ctx) {
         ? resolved
         : { ...resolved, reasoningEffort: resolved.reasoningEffort ?? 'high', temperature: resolved.temperature ?? 0.1 };
     }
+    // Only a CONFIGURED level is checked: the unidentified-child fallback above
+    // stamps the preset's own default, which the adapter may legitimately clamp.
+    const injectsEffort = role.effort !== undefined && role.effort !== 'none' && role.effort !== resolved.reasoningEffort;
+    if (injectsEffort) await assertEffortDeclared(ctx, options.provider, options.model, role.effort);
     return {
       ...resolved,
-      ...(role.effort === undefined || role.effort === 'none' || role.effort === resolved.reasoningEffort ? {} : { reasoningEffort: role.effort }),
+      ...(injectsEffort ? { reasoningEffort: role.effort } : {}),
       ...(role.temperature === undefined || role.temperature === resolved.temperature ? {} : { temperature: role.temperature }),
     };
   });

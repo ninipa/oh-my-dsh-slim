@@ -51,9 +51,13 @@ and temperature apply immediately (next delegation); role toggles
 and tool permissions take effect after restarting DSH. See the
 [repo README](https://github.com/ninipa/oh-my-dsh-slim#configuration).
 
-Effort values: `none | off | low | medium | high | max` — `none` omits the
-`reasoningEffort` parameter entirely (for models that do not support effort
-control, e.g. local LLMs); `off` explicitly disables reasoning.
+Effort values come from the model catalog: `none` omits the `reasoningEffort`
+parameter entirely (for models that do not support effort control, e.g. local
+LLMs), `off` explicitly disables reasoning, and the rest (`low`/`medium`/
+`high`/`max`/`xhigh`/…) are adapter-owned and open-ended. The card offers
+exactly the levels the selected model declares; a configuration accepts any
+well-formed level token, and a level the chosen model does not declare fails on
+the first delegation with an error naming that model's levels.
 
 ### Multiple configurations (multi-preset, 0.4.0)
 
@@ -147,8 +151,10 @@ dsh plugin --profile web add oh-my-dsh-slim
 oh-my-dsh-slim：角色开关/模型/思考强度、高级 maxTokens/temperature）或旧版
 `$DSH_HOME/oh-my-dsh-slim.json`（无设置服务时），升级永不触碰。
 模型/思考强度/温度改完立即生效（下一次委派）；角色开关与工具权限需重启
-DSH 生效。思考强度取值 `none | off | low | medium | high | max`——`none` 表示完全不发送
-`reasoningEffort` 参数（适用于不支持思考强度的模型，如本地 LLM）；`off` 表示明确关闭推理。
+DSH 生效。思考强度取值来自模型目录：`none` 表示完全不发送
+`reasoningEffort` 参数（适用于不支持思考强度的模型，如本地 LLM）；`off` 表示明确关闭推理；其余档位
+（`low`/`medium`/`high`/`max`/`xhigh`/…）由各适配器自己定义、集合开放。卡片只列所选模型声明的档位；
+配置侧接受任何形状合法的档位 token，而该模型未声明的档位会在第一次委派时报错并列出它真正支持的档位。
 完整功能说明、配置指南与验收清单见
 [仓库 README](https://github.com/ninipa/oh-my-dsh-slim#readme)。
 

@@ -38,9 +38,17 @@ const noneDoc = schema({ presets: { 'my-dsh-normal': { fixer: { effort: 'none' }
 check(noneDoc.presets['my-dsh-normal'].fixer.effort === 'none',
   'effort "none" (omit reasoningEffort for effort-less models) resolves');
 
+// Effort ids are adapter-owned and open-ended, so the namespace checks SHAPE
+// only: a fixed vocabulary here rejected intelalloc's `xhigh` (which the model
+// catalog offers) while accepting levels another model rejects. Membership is
+// decided at runtime against the exact model's declared efforts.
+const xhighDoc = schema({ presets: { 'my-dsh-normal': { oracle: { effort: 'xhigh' } } } });
+check(xhighDoc.presets['my-dsh-normal'].oracle.effort === 'xhigh',
+  'effort "xhigh" (adapter-owned level outside the factory vocabulary) passes');
+
 console.log('\n[value domains]');
 const attempts = [
-  [{ presets: { x: { oracle: { effort: 'bogus' } } } }, /effort/, 'effort enum enforced'],
+  [{ presets: { x: { oracle: { effort: 'high!' } } } }, /pattern|effort|expected/, 'effort shape enforced'],
   [{ presets: { x: { oracle: { deny: ['not-a-tool'] } } } }, /deny|expected/, 'tool names validated in deny'],
   [{ mcpServers: { x: { transport: 'carrier-pigeon' } } }, /transport/, 'MCP transport enum enforced'],
   [{ presets: { x: { oracle: { maxTokens: 'lots' } } } }, /maxTokens|number|expected/, 'maxTokens must be a number'],

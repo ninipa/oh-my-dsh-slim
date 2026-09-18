@@ -27,7 +27,7 @@ const provider = {
 
 /** Fresh harness per scenario: captures the registered tool and requests. */
 function makeHarness({ knownGlobals, services = {} } = {}) {
-  const state = { tool: undefined, request: undefined, setupCount: 0, setupCallback: undefined, mcpCalls: [], startCalls: [], sections: [] };
+  const state = { tool: undefined, request: undefined, mcpCalls: [], startCalls: [], sections: [], createdHandler: undefined };
   const ctx = {
     tools: {
       register(definition) { state.tool = definition; return () => {}; },
@@ -43,7 +43,6 @@ function makeHarness({ knownGlobals, services = {} } = {}) {
     get(name) { return name in services ? services[name] : undefined; },
     subagents: {
       getProvider(name) { return name === 'spawn' ? provider : undefined; },
-      registerContinuableSetup(callback) { state.setupCount++; state.setupCallback = callback; return () => {}; },
       async startContinuable(spec) { state.request = spec.request; return { childId: 'test-child' }; },
       async start(_providerName, request) {
         state.startCalls.push(request);
@@ -55,7 +54,9 @@ function makeHarness({ knownGlobals, services = {} } = {}) {
       },
     },
     systemPrompt: { section(definition) { state.sections.push(definition); } },
-    on() {},
+    // 0.1.2+: the MCP attachment seam is an agent/created observer on the
+    // standing scope; capture it so scenarios can fire synthetic children.
+    on(event, handler) { if (event === 'agent/created') state.createdHandler = handler; },
     logger: { info() {}, warn() {} },
   };
   return { ctx, state };
@@ -91,8 +92,9 @@ console.log('\n[librarian: continuable + MCP defaults]');
   });
   if (!state.tool) throw new Error('role tool was not registered');
   await state.tool.execute({ description: 'test research', prompt: 'test prompt' }, EXEC);
-  check(state.setupCount === 1, `one continuable setup registered (got ${state.setupCount})`);
+  check(typeof state.createdHandler === 'function', 'agent/created observer registered for MCP role');
   check(state.request?.agentOptions?.dshRoleId === 'librarian', 'stable role id present in request');
+  check(state.request?.agentOptions?.dshRunMode === 'continuable', 'continuable delegation carries dshRunMode=continuable');
   check(state.request?.agentOptions?.model === expectedLibrarianModel && state.request?.agentOptions?.maxTokens === 48000, `JSON model settings applied (${expectedLibrarianModel}): ${JSON.stringify(state.request?.agentOptions)}`);
   check(state.request?.persona?.includes('oh-my-dsh-slim-role:librarian'), 'role marker present in persona');
   check(state.request?.toolFilter?.allow === undefined, 'deny-only tool filter');
@@ -100,13 +102,27 @@ console.log('\n[librarian: continuable + MCP defaults]');
   if (JSON.stringify(state.request?.toolFilter?.deny) !== JSON.stringify(expectedDeny)) throw new Error(`unexpected tool deny filter: ${JSON.stringify(state.request?.toolFilter?.deny)}`);
   check(!state.request.toolFilter.deny.includes('skill'), 'deny entry for unregistered "skill" is dropped (rc.2 restrict validation)');
   check(state.request.toolFilter.deny.includes('edit') && state.request.toolFilter.deny.includes('write'), 'deny entries for registered tools survive');
-  const childCtx = {
-    agent: { session: { events: [{ type: 'subagent/descriptor', data: { persona: state.request.persona } }] } },
-    plugin(_plugin, config) { state.mcpCalls.push(config); return Promise.resolve(); },
-    on() {},
-  };
-  state.setupCallback(childCtx);
+  // Fire agent/created for synthetic children derived from the actual request
+  // (options passthrough mirrors the host forwarding dshRoleId/dshRunMode).
+  const fireCreated = (overrides) => state.createdHandler({ agent: {
+    id: 'child-x',
+    options: { ...state.request.agentOptions, ...overrides },
+    session: { events: [] },
+    ctx: {
+      plugin(_plugin, config) { state.mcpCalls.push(config); return Promise.resolve(); },
+      on() {},
+    },
+  } });
+  fireCreated({});
+  await new Promise((resolve) => setTimeout(resolve, 0)); // serial install chain is async
   check(state.mcpCalls.map((call) => call.serverName).join(',') === 'context7,gh_grep', `scoped MCP calls: ${JSON.stringify(state.mcpCalls.map((c) => c.serverName))}`);
+  const before = state.mcpCalls.length;
+  fireCreated({ dshRunMode: 'one-shot' });
+  fireCreated({ dshRoleId: 'fixer' });
+  fireCreated({ dshRoleId: 'explorer' });
+  fireCreated({ dshRoleId: 'librarian', dshRunMode: 'one-shot' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  check(state.mcpCalls.length === before, 'one-shot children and other roles never get MCP');
 
   console.log('\n[方案3: MCP role transparency]');
   check(state.tool.description.includes('do not mount this role\'s MCP tools (mcp__context7__*/mcp__gh_grep__*)'), 'tool description warns about missing MCP in foreground runs');
@@ -139,6 +155,23 @@ console.log('\n[方案3: explicit one-shot configuration stays unannotated]');
   check(!state.tool.description.includes('do not mount this role\'s MCP tools'), 'one-shot librarian description has no MCP warning (user choice respected)');
 }
 
+console.log('\n[continuable schema: run_in_background wording matches the strict foreground discipline]');
+{
+  // 0.5.0-13: the parameter schema is the closest text to argument emission; it
+  // must repeat the strict rule (persona step 5 + tool description), never the
+  // stock "when your next action depends on it" wording that invites foreground
+  // runs the discipline forbids (omen-alpha 2026-09-04 slip).
+  const { ctx, state } = makeHarness();
+  apply(ctx, {
+    provider: 'spawn', roleId: 'explorer', toolName: 'subagent_explorer',
+    backgroundMode: 'continuable', maxDepth: 1, persona: 'You are Explorer.',
+  });
+  const schemaText = JSON.stringify(state.tool.parameters);
+  check(schemaText.includes('explicitly asked to wait in place'), 'run_in_background schema carries the strict foreground rule');
+  check(!schemaText.includes('next action depends'), 'run_in_background schema has no stock "next action depends" wording');
+  check(!JSON.stringify(state.tool.description).includes('next action depends'), 'tool description has no stock "next action depends" wording');
+}
+
 console.log('\n[soft-disable: observer ships disabled]');
 {
   // defaults.json force-locks observer.enabled=false: nothing may register.
@@ -149,7 +182,7 @@ console.log('\n[soft-disable: observer ships disabled]');
     advertisement: '@observer (subagent_observer)\nVisual lane…',
   });
   check(state.tool === undefined, 'disabled observer registers NO tool');
-  check(state.setupCount === 0, 'disabled observer registers no MCP setup');
+  check(state.createdHandler === undefined, 'disabled observer registers no agent/created observer');
   check(state.sections.length === 0, 'disabled observer injects no prompt sections (no dead advertisement)');
 }
 

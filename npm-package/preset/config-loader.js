@@ -35,8 +35,21 @@ const PROFILE_DIR_TEST_ENV = 'OH_MY_DSH_SLIM_PROFILE_DIR';
 // without an import cycle (settings-schema.js imports the constants below).
 export const SETTINGS_NS = 'oh-my-dsh-slim';
 const ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
-// Reasoning-effort vocabulary accepted for every role and the orchestrator.
+// The preset's FACTORY effort vocabulary: what defaults.json ships and what the
+// settings card falls back to when a model is not in the host catalog. It is
+// deliberately NOT a validation gate — effort ids are adapter-owned and
+// open-ended (the host types them as an opaque branded id), so a fixed list is
+// a snapshot that goes stale. Gating on this list is what rejected intelalloc's
+// `xhigh` while the model catalog offered it. Writers check SHAPE
+// (isEffortToken); whether a model accepts a level is checked at runtime
+// against that exact model's declared efforts (effort-by-role.js).
 export const EFFORT_LEVELS = ['none', 'off', 'low', 'medium', 'high', 'max'];
+// Shape rule for an effort token: a short identifier, not a vocabulary claim.
+// Exported so the settings schema applies the identical rule (one definition).
+export const EFFORT_TOKEN_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
+export function isEffortToken(value) {
+  return typeof value === 'string' && EFFORT_TOKEN_PATTERN.test(value);
+}
 const RUNTIME_DEFAULTS = {
   oracle: { temperature: 0.1, maxTokens: 128000 },
   designer: { temperature: 0.7, maxTokens: 64000 },
@@ -186,7 +199,7 @@ function validateRole(roleId, role, servers) {
   if (role.enabled !== undefined && typeof role.enabled !== 'boolean') throw new Error(`oh-my-dsh-slim: ${roleId}.enabled must be a boolean`);
   if (role.provider !== undefined && typeof role.provider !== 'string') throw new Error(`oh-my-dsh-slim: ${roleId}.provider must be a string`);
   if (role.model !== undefined && typeof role.model !== 'string') throw new Error(`oh-my-dsh-slim: ${roleId}.model must be a string`);
-  if (role.effort !== undefined && !EFFORT_LEVELS.includes(role.effort)) throw new Error(`oh-my-dsh-slim: ${roleId}.effort is invalid`);
+  if (role.effort !== undefined && !isEffortToken(role.effort)) throw new Error(`oh-my-dsh-slim: ${roleId}.effort must be a short token of letters, digits, "-" or "_"`);
   if (role.temperature !== undefined && (typeof role.temperature !== 'number' || role.temperature < 0 || role.temperature > 2)) {
     throw new Error(`oh-my-dsh-slim: ${roleId}.temperature must be between 0 and 2`);
   }

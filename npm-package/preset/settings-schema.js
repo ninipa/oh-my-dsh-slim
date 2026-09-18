@@ -1,16 +1,23 @@
 // Settings-namespace schema for oh-my-dsh-slim.
 //
-// defaults.json stays the single source of truth: role ids, effort levels and
-// tool names come from config-loader.js, so this schema cannot drift from what
-// the loader actually merges. It validates the USER-INTENT document — the same
-// shape as the legacy oh-my-dsh-slim.json; semantic merging (deny union,
-// hidden runtime defaults, force-locked roles) remains in config-loader.js.
-// Schemastery permits extra keys, which keeps the namespace forward-compatible
-// with future fields.
+// defaults.json stays the single source of truth for role ids and tool names,
+// so this schema cannot drift from what the loader actually merges. It
+// validates the USER-INTENT document — the same shape as the legacy
+// oh-my-dsh-slim.json; semantic merging (deny union, hidden runtime defaults,
+// force-locked roles) remains in config-loader.js. Schemastery permits extra
+// keys, which keeps the namespace forward-compatible with future fields.
+//
+// `effort` is checked by SHAPE, not by vocabulary: effort ids are adapter-owned
+// and open-ended, and a document must stay writable on a machine where the
+// provider that declares a level is not imported (or is offline). Whether the
+// chosen model accepts the level is decided at runtime, against that model's
+// declared efforts, in effort-by-role.js.
 
-import { EFFORT_LEVELS, ROLE_IDS, SETTINGS_NS, TOOL_NAMES } from './config-loader.js';
+import { EFFORT_TOKEN_PATTERN, ROLE_IDS, SETTINGS_NS, TOOL_NAMES } from './config-loader.js';
 
 const MCP_TRANSPORTS = ['stdio', 'streamable-http'];
+const EFFORT_DESCRIPTION =
+  'Reasoning effort for delegated children (a token from the model catalog; shape-checked here, matched against the model at runtime)';
 
 export { SETTINGS_NS };
 
@@ -20,7 +27,7 @@ export function buildSettingsSchema(z) {
       enabled: z.boolean().description('Mount the delegation tool for this role'),
       provider: z.string().description('Provider for delegated children'),
       model: z.string().description('Model id for delegated children'),
-      effort: z.union([...EFFORT_LEVELS]).description('Reasoning effort for delegated children'),
+      effort: z.string().pattern(EFFORT_TOKEN_PATTERN).description(EFFORT_DESCRIPTION),
       temperature: z.number().description('Sampling temperature; the per-role runtime default applies when omitted'),
       maxTokens: z.number().description('Response token budget; the per-role runtime default applies when omitted'),
       tools: z.array(z.union([...TOOL_NAMES])).description('Explicit global-tool allow list (deny-only semantics is the default)'),
@@ -31,7 +38,7 @@ export function buildSettingsSchema(z) {
   const presetShape = () =>
     z.object({
       orchestrator: z.object({
-        effort: z.union([...EFFORT_LEVELS]).description('Reasoning effort for the orchestrator'),
+        effort: z.string().pattern(EFFORT_TOKEN_PATTERN).description('Reasoning effort for the orchestrator'),
         mcps: z.array(z.string()).description('MCP servers for the orchestrator'),
       }),
       ...Object.fromEntries(ROLE_IDS.map((roleId) => [roleId, roleShape()])),

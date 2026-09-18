@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateConfigDocument } from '../config-loader.js';
 
 const clientPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'npm-package', 'client', 'client.js');
 const source = readFileSync(clientPath, 'utf8');
@@ -461,6 +462,29 @@ console.log('\n[model-scoped effort options (flash+medium regression)]');
   check(mismatch('medium', 'ghost-provider', 'ghost-model') === false, 'unknown model → fallback list → no mismatch block');
   check(mismatch('high', 'generic', 'local-model') === true, 'no-reasoning model + explicit level flagged (only none allowed)');
   check(mismatch('high', 'intelalloc', 'gpt-5.6-sol') === false, 'sol + high fine (catalog-driven, not preset-list-driven)');
+
+  // The link that was missing (2026-09-18): every level the card OFFERS must be
+  // writable by the configuration paths. The card derives options from the live
+  // model catalog while the writers gated on a fixed vocabulary, so a level a
+  // model genuinely declares outside that list was selectable but unsaveable
+  // (intelalloc xhigh: save failed with "effort is invalid").
+  const unwritable = [];
+  for (const group of CATALOG.groups) {
+    for (const model of group.models) {
+      for (const option of card.effortOptionsFor(CATALOG.groups, group.id, model.id)) {
+        try {
+          validateConfigDocument({
+            preset: 'p',
+            presets: { p: { oracle: { provider: group.id, model: model.id, effort: option.value } } },
+          });
+        } catch (error) {
+          unwritable.push(`${group.id}/${model.id}:${option.value} (${error.message})`);
+        }
+      }
+    }
+  }
+  check(unwritable.length === 0,
+    `every catalog-offered level is writable by the profile RPC${unwritable.length === 0 ? '' : ` — unwritable: ${unwritable.join('; ')}`}`);
 }
 
 console.log(failures === 0 ? '\nCLIENT CARD: ALL CHECKS PASSED' : `\nCLIENT CARD: ${failures} CHECK(S) FAILED`);

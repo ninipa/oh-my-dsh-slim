@@ -147,10 +147,22 @@ const VALID_CONFIG = { preset: 'my-dsh-normal', roles: { fixer: { model: 'custom
   const id = profileIdForDisplayName('GPT 系列');
   check(existsSync(join(home, id)), 'create: first profile untouched by the rejected duplicate');
   let invalidErr;
-  try { await endpoints.create({ displayName: '坏配置', config: { roles: { oracle: { effort: 'bogus' } } } }); } catch (error) { invalidErr = error; }
+  try { await endpoints.create({ displayName: '坏配置', config: { roles: { oracle: { effort: 'high!' } } } }); } catch (error) { invalidErr = error; }
   check(invalidErr?.code === 'PROFILE_INVALID_CONFIG', 'create: invalid config rejected');
   const badId = profileIdForDisplayName('坏配置');
   check(!existsSync(join(home, badId)), 'create: invalid-config failure rolls the copy back (no half-authored profile)');
+  // Effort vocabulary is adapter-owned: a well-formed level outside the preset's
+  // factory list must SAVE (2026-09-18 regression — the card offers exactly the
+  // levels the model declares, so rejecting one here made an offered option
+  // unsaveable: intelalloc xhigh failed with "effort is invalid").
+  const catalogLevel = await endpoints.create({
+    displayName: 'catalog 档位',
+    config: { roles: { oracle: { provider: 'intelalloc', model: 'gpt-5.6-sol', effort: 'xhigh' } } },
+  });
+  check(
+    JSON.parse(readFileSync(join(home, catalogLevel.id, 'profile.json'), 'utf8')).roles.oracle.effort === 'xhigh',
+    'create: a catalog-declared level outside the factory list (xhigh) is accepted and persisted',
+  );
   let emptyName;
   try { await endpoints.create({ displayName: '   ', config: {} }); } catch (error) { emptyName = error; }
   check(emptyName instanceof TypeError && emptyName?.code === undefined, 'create: empty name rejected');

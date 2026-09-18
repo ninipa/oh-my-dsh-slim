@@ -4,6 +4,31 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.5.2] — 2026-09-18
+
+> **Supported DSH: 0.1.2-rc.1 … 0.1.5-rc.2** — both host lines are verified end to end
+> (the 0.1.5 line re-verified on rc.2; no host-facing contract changed in this release).
+> **Upgrading requires a DSH restart** (plugin code mounts once per host process).
+
+### Fixed
+
+- **A reasoning-effort level a model genuinely declares can now be saved.** The settings card
+  derives the effort dropdown from the live model catalog, while the configuration paths
+  validated the value against a fixed vocabulary (`none/off/low/medium/high/max`) — so a level
+  outside that list (e.g. `xhigh`, which `intelalloc/gpt-5.6-sol` declares) was selectable in the
+  GUI but rejected on save with `effort is invalid`, and on the bundled profile the host's
+  settings schema rejected it the same way.
+
+### Changed
+
+- **Effort values are shape-checked, not vocabulary-checked.** Effort ids are adapter-owned and
+  open-ended, so the writers now reject only malformed tokens; the question "does this model
+  accept this level" moved to where it can actually be answered — `llm.resolveModel` at the first
+  delegation, which fails with a readable error naming the model's declared levels and adapter
+  default. Unavailable metadata (provider not imported, model unknown, host still starting) fails
+  open and is re-checked later, so a configuration stays readable and writable offline and on
+  another machine.
+
 ## [0.5.1] — 2026-09-10
 
 > **Supported DSH: 0.1.2-rc.1 … 0.1.5-rc.1** — both host lines are verified end to end.

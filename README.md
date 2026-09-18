@@ -9,9 +9,10 @@ subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 > Persona text adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), attribution retained —
 > see [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
 
-> **⚠️ DSH version support (0.5.1)**: **DSH 0.1.2-rc.1 through 0.1.5-rc.1** — both host lines are
-> verified end to end (0.1.2-rc.1 and 0.1.5-rc.1). On DSH 0.1.1 or below, stay on oh-my-dsh-slim
-> **0.4.0**: the plugin detects the mismatch, leaves your existing preset directory untouched (it
+> **⚠️ DSH version support (0.5.2)**: **DSH 0.1.2-rc.1 through 0.1.5-rc.2** — both host lines are
+> verified end to end (the 0.1.2 line; the 0.1.5 line on both rc.1 and rc.2). On DSH 0.1.1 or
+> below, stay on oh-my-dsh-slim **0.4.0**: the plugin detects the mismatch, leaves your existing
+> preset directory untouched (it
 > stays fully usable) and shows a notice under **Settings → Plugins → oh-my-dsh-slim-compat**.
 > **Upgrading requires a DSH restart** (plugin code is mounted once per host process; new sessions
 > alone do not pick it up).
@@ -61,8 +62,8 @@ waking it** (zero extra model turns).
 
 ## Install
 
-Requires **DSH 0.1.2-rc.1 through 0.1.5-rc.1** (both verified) and a DeepSeek API key (default
-models route through deepseek-official). Older DSH releases are **not supported by 0.5.1** — on
+Requires **DSH 0.1.2-rc.1 through 0.1.5-rc.2** (both verified) and a DeepSeek API key (default
+models route through deepseek-official). Older DSH releases are **not supported by 0.5.2** — on
 DSH 0.1.1 or below use oh-my-dsh-slim 0.4.0 (see the version note at the top).
 
 **Option A — plugin marketplace GUI (recommended):** open **Settings → Plugins** in the DSH web
@@ -132,11 +133,13 @@ All three channels share one document shape (schema:
 - **Effort vocabulary**: `none` omits the `reasoningEffort` parameter entirely — for models that
   do not support effort control (e.g. local LLMs without a reasoning-effort field); `off`
   explicitly disables reasoning on models that support the parameter. Other levels
-  (`low`/`medium`/`high`/`max` …) are **model-scoped**: the adapter accepts only the levels the
-  selected model declares (the DeepSeek adapter, for example, accepts `off/low/high/max` and
-  rejects `medium`), and an unsupported level fails loudly at request time. The GUI card's
-  effort dropdown is built from each model's declared set and blocks out-of-set values with an
-  inline warning
+  (`low`/`medium`/`high`/`max`/`xhigh` …) are **model-scoped** and open-ended: each adapter owns
+  its own ids, so the configuration accepts any well-formed effort token (a token you can save on
+  this machine stays valid when the config moves to another one) and the check against the chosen
+  model happens at delegation time. An unsupported level fails loudly on the first delegation,
+  naming the levels that model declares and its adapter default. The GUI card's effort dropdown is
+  built from each model's declared set, and an explicit out-of-set value gets an inline warning
+  that blocks saving.
 - **Model validation**: at delegation time the configured model id is checked against the
   providers you imported in **Settings → Models**. An unknown model fails loud on the first
   delegation, listing every imported model (including the vision-capable subset) — no silent

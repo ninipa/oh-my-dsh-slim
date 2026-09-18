@@ -117,10 +117,12 @@ async function run(ctx) {
     sessionId: SessionId(`session-${randomUUID()}`),
     meta: { cwd: process.cwd() },
     agentOptions: { provider: selection?.provider, model: selection?.model },
-    setup: async (agentCtx) => {
+    setup: async (agentCtx, agent) => {
       await presets.mount(agentCtx);
       const policy = agentCtx.get('sandboxPolicy');
-      const session = agentCtx.agent?.session;
+      // 0.1.5 removed the `ctx.agent` accessor: the setup callback receives the
+      // Agent as its second argument (dsh-agent-loop setupAndPublish).
+      const session = agent.session;
       const bashDef = agentCtx.tools?.get?.('bash');
       captured.policyMounted = policy !== void 0 && typeof policy?.resolve === 'function';
       captured.mode = policy?.resolve?.({ session })?.mode;

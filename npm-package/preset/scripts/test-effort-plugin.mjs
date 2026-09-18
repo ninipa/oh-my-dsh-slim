@@ -164,6 +164,93 @@ console.log('\n[none]');
   }
 }
 
+// ── a configured level is checked against the exact model's declared efforts ─
+// Effort ids are adapter-owned, so the configuration writers accept any
+// well-formed token and this waterfall decides whether the chosen model
+// declares it. Metadata that cannot be resolved fails open; only a derived
+// verdict is cached.
+console.log('\n[effort-declared]');
+{
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const declared = ['low', 'medium', 'xhigh', 'max'];
+  const modelStub = (calls) => ({
+    resolveModel: async (provider, model) => {
+      calls.push(`${provider}/${model}`);
+      return { reasoning: { efforts: declared.map((id) => ({ id })), defaultEffort: 'medium' } };
+    },
+  });
+  const runWith = async (effort, llm, model = 'gpt-5.6-sol') => {
+    const tmp = join(tmpdir(), `omds-effort-declared-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    writeFileSync(tmp, JSON.stringify({ preset: 'p', presets: { p: { fixer: { effort } } } }));
+    const prev = process.env.OH_MY_DSH_SLIM_CONFIG;
+    process.env.OH_MY_DSH_SLIM_CONFIG = tmp;
+    try {
+      const ctx = makeCtx();
+      ctx.get = (name) => (name === 'llm' ? llm : undefined);
+      apply(ctx);
+      return await requestThrough(
+        ctx,
+        { provider: 'intelalloc', model, maxTokens: 33333, dshRoleId: 'fixer', subagentDepth: 1 },
+        { provider: 'intelalloc', model },
+      );
+    } finally {
+      if (prev === undefined) delete process.env.OH_MY_DSH_SLIM_CONFIG;
+      else process.env.OH_MY_DSH_SLIM_CONFIG = prev;
+      rmSync(tmp, { force: true });
+    }
+  };
+  const catchFrom = async (effort, llm, model) => {
+    try {
+      await runWith(effort, llm, model);
+      return undefined;
+    } catch (error) {
+      return error;
+    }
+  };
+
+  // Each case runs on its own provider/model/effort key: verdicts are cached
+  // per key, so sharing one would serve a case from another case's verdict.
+  const calls = [];
+  const declaredRun = await runWith('xhigh', modelStub(calls));
+  if (declaredRun.reasoningEffort === 'xhigh') pass('a declared level (xhigh) is injected');
+  else fail(`declared level not injected: ${JSON.stringify(declaredRun)}`);
+
+  await runWith('xhigh', modelStub(calls));
+  if (calls.length === 1) pass('the verdict is cached per provider/model/effort');
+  else fail(`verdict re-resolved ${calls.length} times`);
+
+  const undeclared = await catchFrom('ultra', modelStub([]));
+  if (undeclared && /ultra/.test(undeclared.message) && /xhigh/.test(undeclared.message) && /medium/.test(undeclared.message)) {
+    pass('an undeclared level fails with the declared list in the message');
+  } else {
+    fail(`undeclared level not rejected: ${undeclared === undefined ? 'no error' : undeclared.message}`);
+  }
+
+  const offline = await runWith('ultra', { resolveModel: async () => { throw new Error('provider not registered'); } }, 'offline-model');
+  if (offline.reasoningEffort === 'ultra') pass('unresolvable metadata fails open');
+  else fail(`unresolvable metadata blocked the request: ${JSON.stringify(offline)}`);
+
+  const noService = await runWith('ultra', undefined, 'no-service-model');
+  if (noService.reasoningEffort === 'ultra') pass('a missing llm service fails open');
+  else fail(`missing llm service blocked the request: ${JSON.stringify(noService)}`);
+
+  const noEfforts = await runWith('ultra', { resolveModel: async () => ({ reasoning: {} }) }, 'no-efforts-model');
+  if (noEfforts.reasoningEffort === 'ultra') pass('a model with no declared efforts fails open');
+  else fail(`model without declared efforts blocked the request: ${JSON.stringify(noEfforts)}`);
+
+  // "Could not judge" must not be sticky: the same key judged later still fails.
+  const lateKey = 'late-model';
+  const beforeJudgement = await runWith('ultra', undefined, lateKey);
+  const afterJudgement = await catchFrom('ultra', modelStub([]), lateKey);
+  if (beforeJudgement.reasoningEffort === 'ultra' && afterJudgement && /ultra/.test(afterJudgement.message)) {
+    pass('an unjudged key is re-judged once metadata is available');
+  } else {
+    fail('an unjudged verdict was cached and never re-checked');
+  }
+}
+
 // (The matrix-key uniqueness and table coverage checks live in t0-validate.mjs
 // section [3]; no duplication here.)
 
