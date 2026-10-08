@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { upstream } from './upstream-baseline.mjs';
 import { providerWording, roleDescription, schedulingDescription, backgroundSection, patchRoleTool, patchRoleSection } from '../npm-package/preset/role-wording.js';
 import { patchedContext } from '../npm-package/preset/roles.js';
-const source = execFileSync('git', ['show', '1a29e706710b0a967021fa963ba607b0e683029e:role-subagent.js'], {
-  cwd: fileURLToPath(new URL('../', import.meta.url)), encoding: 'utf8',
-}).replaceAll('\r\n', '\n');
+const source = upstream('role-subagent.js').replaceAll('\r\n', '\n');
 const originalProvider = new Function(source.match(/function providerWording\(inheritsConversation\) \{[\s\S]*?\n\}/)[0] + ';return providerWording;')();
 const evaluate = (params, expression, values) => new Function(...params, 'return ' + expression)(...values);
 const options = { toolName: 'subagent_librarian', description: 'Role details.', backgroundMode: 'continuable', mcps: ['context7', 'gh_grep'] };

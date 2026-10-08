@@ -7,7 +7,7 @@
   "main": "npm-package/lib/index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Henry-916/oh-my-dsh-slim.git"
+    "url": "git+https://github.com/ninipa/oh-my-dsh-slim.git"
   },
   "keywords": [
     "deepseek",
@@ -44,6 +44,6 @@
   },
   "engines": {
     "node": ">=20",
-    "dsh": "0.2.0-rc.2"
+    "dsh": ">=0.2.0-rc.2 <0.3.0-0"
   }
 }

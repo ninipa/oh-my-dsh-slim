@@ -1,5 +1,6 @@
 // Named native presets, persisted solely through the host ConfigEditor.
 import { createHash } from 'node:crypto';
+import { assertNativePresetRegistry } from './host-version.js';
 import { validateConfigDocument } from '../preset/config.js';
 import { resolvedDefinition } from '../preset/preset.js';
 import { loadHostSchema } from './config-settings.js';
@@ -34,6 +35,7 @@ export function namedDefinition(ctx, id, record) {
   return { ...definition, id, name: record.displayName, plugins: transform(definition.plugins) };
 }
 export function apply(ctx, config = {}) {
+  assertNativePresetRegistry(ctx);
   const profiles = structuredClone(config.profiles ?? {});
   for (const [id, record] of Object.entries(profiles)) {
     if (!id.startsWith('profile-')) throw profileError('PROFILE_UNSUPPORTED', 'custom profile id must start with profile-');

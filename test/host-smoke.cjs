@@ -1,6 +1,7 @@
 // Opt-in: run under the installed host's Electron/Node with --expose-internals.
 // DSH_HOST_ANCHOR must be an absolute installed host JS entry (inside ASAR is OK).
 const fs = require('node:fs');
+const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 const { createRequire } = require('node:module');
@@ -41,7 +42,11 @@ const hostImport = name => import(pathToFileURL(requireHost.resolve(name)).href)
   const smokeHome = path.join(temporary, 'home'); fs.mkdirSync(smokeHome);
   const profileContext = { home: smokeHome, dir: temporary, patchPath: path.join(temporary, 'cordis.patch.yml'), installAnchor: anchor, name: 'omds-native-smoke', startedBundles: [], bundles: ['omds-smoke-bundle'], overlays: [] };
   ctx = await boot('omds-native-smoke', configPath, patches, root => { root.provide('profileContext', profileContext); }, pathToFileURL(anchor).href);
-  const registry = ctx.get('agentPresets');
+  const versionModule = await import(pathToFileURL(path.join(packageDir, 'lib/host-version.js')).href);
+   assert.equal(versionModule.detectHostDshVersion({ ctx }), '0.2.0-rc.2');
+   assert.equal(versionModule.assertHostCompatible({ ctx }).status, 'ok');
+   console.log('NATIVE_HOST_VERSION_GATE_PASS');
+   const registry = ctx.get('agentPresets');
   if (!registry) throw new Error('Native preset registry unavailable');
   const roster = await registry.list();
   console.log('PRESET_ROSTER ' + JSON.stringify(roster));
@@ -51,7 +56,7 @@ const hostImport = name => import(pathToFileURL(requireHost.resolve(name)).href)
   if (!form) throw new Error('Native role settings namespace unavailable');
   console.log('NATIVE_SETTINGS_SMOKE_PASS ' + form.ns);
   console.log('NATIVE_HOST_SMOKE_PASS ' + JSON.stringify(preset));
-  const assert = require('node:assert/strict');
+
   const profileModule = await import(pathToFileURL(path.join(packageDir, 'lib/profile-registry.js')).href);
   const configModule = await import(pathToFileURL(path.join(packageDir, 'preset/config.js')).href);
   const endpoints = profileModule.makeProfileEndpoints({ agentPresets: registry, getEditor: () => ctx.get('configEditor'), getSettings: () => ctx.get('settings') });

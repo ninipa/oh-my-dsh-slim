@@ -8,21 +8,21 @@
 // (@deepseek-ai/dsh-agent-preset-registry/README), so a directory preset can
 // never appear on that host again — which is exactly why 0.5.x refused to run.
 //
-// This module is therefore advisory, not a gate. The preset rows do not call
-// assertHostCompatible(): an uncaught throw inside a preset row fails the whole
-// mount, and a version probe is not worth that. Only the seeder plugin (which
-// runs in the profile plane) reports a verdict, and it warns instead of
-// throwing.
+// Known unsupported hosts are rejected before the companion accesses host
+// services. An unreadable host version remains fail-open; version admission is
+// an upgrade policy, not a guarantee that unverified hosts expose future APIs.
 
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { hostBaseUrl } from '../preset/bridge.js';
 
-/** Oldest DSH line this preset supports (0.1.2-rc.1 shipped the subagent API it uses). */
-export const MIN_HOST_VERSION = '0.1.2-rc.1';
+/** Minimum host for this declarative preset line. */
+export const MIN_HOST_VERSION = '0.2.0-rc.2';
+export const MAX_HOST_VERSION_EXCLUSIVE = '0.3.0-0';
 
 /**
- * First core version that removed directory agent presets. 0.2.0-rc.2 is below
- * it in semver order (a prerelease sorts before its release), so the whole
- * 0.2.0-rc line has to be allowed explicitly instead of by range endpoint.
+ * Stable core version of the declarative preset line. Admission uses the
+ * prerelease-aware minimum above, not this stable core marker.
  */
 export const DECLARATIVE_PRESET_VERSION = '0.2.0';
 
@@ -97,9 +97,20 @@ export function coreVersion(version) {
  * host copy rather than any stale node_modules duplicate.
  * @returns the version string, or undefined when the host refuses to resolve.
  */
-export function detectHostDshVersion() {
+export function detectHostDshVersion({ ctx, entry = process.argv[1], resolveManifest } = {}) {
   const candidates = ['@deepseek-ai/dsh/package.json', '@deepseek-ai/dsh-app-boot/package.json'];
-  const require = createRequire(import.meta.url);
+  let loader;
+  // A companion context may not inject loader; its running entry still anchors
+  // the host. Do not turn an unavailable service into a version-probe failure.
+  try { loader = ctx?.loader; } catch {}
+  let require;
+  try {
+    const base = loader?.config?.bareModuleBaseUrl ?? hostBaseUrl()
+      ?? loader?.ctx?.baseUrl ?? loader?.config?.baseUrl
+      ?? (entry ? pathToFileURL(entry).href : undefined);
+    if (!base) return undefined;
+    require = resolveManifest ?? createRequire(base);
+  } catch { return undefined; }
   for (const specifier of candidates) {
     try {
       const manifest = require(specifier);
@@ -113,73 +124,78 @@ export function detectHostDshVersion() {
  * Decide whether a host version is supported.
  * @param host - detected host version; undefined means "could not tell".
  * @returns { status, host, message } with status one of:
- *   'ok' (a verified host), 'older' (below MIN_HOST_VERSION),
- *   'legacy-preset-model' (>= 0.2.0 but not a verified prerelease),
- *   'directory' (0.1.6-0.1.x: declarative presets, unfitting seams),
+ *   'ok' (admitted by the package range, not necessarily verified),
+ *   'older' (below MIN_HOST_VERSION), 'unsupported' (outside upgrade policy),
  *   'unknown' (no version could be read).
  */
-export function hostVerdict(host) {
+export function hostVerdict(host = detectHostDshVersion()) {
   const parsed = parseSemver(host);
   if (parsed === void 0) {
     return {
       status: 'unknown',
       host,
       message:
-        'oh-my-dsh-slim could not read the DSH version. The preset rows still mounted; '
-        + 'if the role tools do not appear, check that DSH >= ' + MIN_HOST_VERSION + ' is running.',
+        'oh-my-dsh-slim could not read the DSH version; version checking is fail-open. '
+        + 'Check that DSH >= ' + MIN_HOST_VERSION + ' is running if native preset services are unavailable.',
     };
   }
-  if (compareSemver(parsed, parseSemver(MIN_HOST_VERSION)) < 0) {
+  if (compareSemver(parsed, MIN_HOST_VERSION) < 0) {
     return {
       status: 'older',
       host,
       message:
         'oh-my-dsh-slim requires DSH >= ' + MIN_HOST_VERSION + ' (this host: DSH ' + host + '). '
-        + 'The role tools need the subagent composition seam that line introduced.',
+        + 'For DSH <=0.1.5 use oh-my-dsh-slim@0.5.3; otherwise upgrade DSH to '
+        + MIN_HOST_VERSION + ' or a host admitted by >= ' + MIN_HOST_VERSION + ' < ' + MAX_HOST_VERSION_EXCLUSIVE + '.',
     };
   }
-  if (compareSemver(parsed, parseSemver(DECLARATIVE_PRESET_VERSION)) >= 0) {
+  // Match npm's default prerelease admission: a comparator naming 0.2.0-rc.2
+  // admits later 0.2.0 prereleases, not prereleases of later patch versions.
+  if (compareSemver(parsed, MAX_HOST_VERSION_EXCLUSIVE) >= 0
+      || (parsed.prerelease.length > 0 && (parsed.major !== 0 || parsed.minor !== 2 || parsed.patch !== 0))) {
     return {
-      status: 'legacy-preset-model',
+      status: 'unsupported',
       host,
       message:
-        'oh-my-dsh-slim was verified against DSH ' + VERIFIED_HOST_VERSIONS.join(', ')
-        + ' (this host: DSH ' + host + '). The declarative preset seam is expected to be '
-        + 'compatible; please report anything that is not.',
-    };
-  }
-  if (compareSemver(parsed, parseSemver(LAST_DIRECTORY_PRESET_VERSION)) > 0) {
-    return {
-      status: 'directory',
-      host,
-      message:
-        'oh-my-dsh-slim 0.6.x ships a declarative preset for DSH >= ' + DECLARATIVE_PRESET_VERSION
-        + ' (this host: DSH ' + host + '). The 0.1.6-0.1.x line declares presets by bundle patch '
-        + 'but predates the seams this preset uses. Use oh-my-dsh-slim 0.5.x on DSH <= '
-        + LAST_DIRECTORY_PRESET_VERSION + ', or upgrade to DSH ' + VERIFIED_HOST_VERSIONS[0] + '.',
+        'oh-my-dsh-slim admits DSH >= ' + MIN_HOST_VERSION + ' < ' + MAX_HOST_VERSION_EXCLUSIVE
+        + ' (this host: DSH ' + host + '). Only DSH ' + VERIFIED_HOST_VERSIONS.join(', ')
+        + ' is verified; use an admitted host or a plugin release that explicitly supports this host.',
     };
   }
   return { status: 'ok', host, message: void 0 };
 }
 
 /**
- * Legacy advisory gate. Preset rows never call it (see the header); it exists
- * for the seeder and for callers that already handle a throw.
+ * Reject known unsupported hosts before native service access. An unreadable
+ * host remains fail-open, and the existing explicit environment overrides remain.
  * @param options - optional version override.
  * @returns the verdict when compatible.
  * @throws when the host is outside the supported range.
  */
 export function assertHostCompatible(options = {}) {
   if (process.env.OMDS_ALLOW_OLD_HOST === '1' || process.env.OMDS_ALLOW_NEW_HOST === '1') {
-    return { status: 'forced', host: options.version ?? detectHostDshVersion(), message: void 0 };
+    return { status: 'forced', host: options.version ?? detectHostDshVersion(options), message: void 0 };
   }
-  const verdict = hostVerdict(options.version ?? detectHostDshVersion());
+  const verdict = hostVerdict(options.version ?? detectHostDshVersion(options));
   if (verdict.status === 'ok' || verdict.status === 'unknown') return verdict;
   throw new Error(verdict.message);
 }
 
+/** Check the required native registry before any register() call. */
+export function assertNativePresetRegistry(ctx) {
+  const verdict = assertHostCompatible({ ctx });
+  if (typeof ctx?.agentPresets?.register !== 'function') {
+    throw new Error('oh-my-dsh-slim requires the native agent preset registry on DSH >= '
+      + MIN_HOST_VERSION + '. For DSH <=0.1.5 use oh-my-dsh-slim@0.5.3; '
+      + 'otherwise upgrade DSH and enable its native agent preset registry.');
+  }
+  return verdict;
+}
+
 export default {
   MIN_HOST_VERSION,
+  MAX_HOST_VERSION_EXCLUSIVE,
+  assertNativePresetRegistry,
   DECLARATIVE_PRESET_VERSION,
   VERIFIED_HOST_VERSIONS,
   LAST_DIRECTORY_PRESET_VERSION,

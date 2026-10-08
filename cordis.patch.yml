@@ -6,7 +6,9 @@
 # $DSH_HOME/.agent-presets and nothing is copied at runtime.
 #
 # Install:
-#   dsh plugin --profile <non-desktop-profile> add github:Henry-916/oh-my-dsh-slim#feat/dsh-0.2-native
+#   dsh plugin --profile <non-desktop-profile> add oh-my-dsh-slim@0.6.1-native.3
+# Use this spec after publication by ninipa/oh-my-dsh-slim; before release,
+# install an explicitly reviewed commit, never a moving development branch.
 # Desktop installs/updates are managed only through its plugin manager.
 # or add this repository's path to the profile's `dsh.profile.bundles`. Either
 # way the loader mounts preset row below plus the companion row that reports

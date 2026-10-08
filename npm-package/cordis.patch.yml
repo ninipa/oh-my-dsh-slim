@@ -2,11 +2,11 @@
 #
 # Same declaration as the repository-root cordis.patch.yml, with paths relative
 # to this package root instead of the repository root: when the package is
-# installed with
-#   dsh plugin --profile <non-desktop-profile> add ./npm-package
-# This corrected fork is not the upstream npm release. Use the desktop plugin
-# manager for desktop installs; see current README for the fork GitHub spec.
-# the loader appends these rows and the preset mounts with the rest of the tree.
+# installed with (after publication by ninipa/oh-my-dsh-slim)
+#   dsh plugin --profile <non-desktop-profile> add oh-my-dsh-slim@0.6.1-native.3
+# Use the desktop plugin manager for desktop installs. Before publication,
+# use an explicitly reviewed commit, not a moving development branch.
+# The loader appends these rows and the preset mounts with the rest of the tree.
 #
 # test/package.test.mjs in the repository keeps this file and the repository
 # root copy in step.

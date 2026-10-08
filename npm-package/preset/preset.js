@@ -2,6 +2,7 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { hostBaseUrl } from './bridge.js';
+import { assertNativePresetRegistry } from '../lib/host-version.js';
 //
 // This module IS the preset. DSH 0.2.0 replaced directory agent presets
 // ($DSH_HOME/.agent-presets/<name>) with declarative rows, and a plugin bundle
@@ -552,6 +553,7 @@ export function resolvedDefinition(ctx) {
  *   registry resolves the relative row names below against this package.
  */
 export function apply(ctx) {
+  assertNativePresetRegistry(ctx);
   ctx.effect(() => {
     let disposed = false;
     let release;

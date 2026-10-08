@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { execFileSync } from 'node:child_process';
+import { upstream } from './upstream-baseline.mjs';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,9 +10,6 @@ import { apply as applyRequests } from '../npm-package/preset/subagent-roles.js'
 import { latestOwnAssistant } from '../npm-package/preset/subagent-result.js';
 import { escalationArgsAreDoomed, stripEscalationArgs, isDelegatedChild } from '../npm-package/preset/sandbox-strip.js';
 
-const baseline = '1a29e706710b0a967021fa963ba607b0e683029e';
-const root = fileURLToPath(new URL('../', import.meta.url));
-const upstream = name => execFileSync('git', ['show', baseline + ':' + name], { cwd: root, encoding: 'utf8' });
 const defaultDocument = JSON.parse(upstream('defaults.json'));
 
 function fixture(t) {

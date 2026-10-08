@@ -1,17 +1,18 @@
 # oh-my-dsh-slim
 
-**Henry-916 fork · 0.6.1-native.1 · 分支 `feat/dsh-0.2-native`**
+**oh-my-dsh-slim · 0.6.1-native.3 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
 **orchestrator + 5 个启用的专职角色**，交付为从插件组合包挂载的**声明式原生 agent 预设**，
 不是独立应用，也不需要手工复制预设目录。
 
-> **仅实测目标：DSH 0.2.0-rc.2。** 本 fork 不承诺其他宿主版本已验证。
-> 单元/契约测试与真实打包宿主的无网络 smoke 是不同验证层。此前 native.1 安装后，用户已通过 CPA
-> 实测 explorer/Qwen low、fixer/Gemini medium、oracle/GPT xhigh 的只读委派与完成回报。
-> **这不是纠正版的回归验收，也不证明上游实际推理档位或在线 MCP 可用。** 本轮纠正不更新用户安装；
-> 日后安装或更新后必须**完整重启 DSH**，仅新建会话不够。
+> **宿主范围：`>=0.2.0-rc.2 <0.3.0-0`；实测宿主：DSH 0.2.0-rc.2。**
+> 范围允许 rc.3、0.2.0 正式版及后续 0.2 稳定版本安装，不代表它们已通过测试。
+> 升级策略：所需 API 不变时维持 0.2 版本线兼容，验证新宿主后才宣称实测支持；0.3 版本线另行审查。
+> **DSH ≤0.1.5 请继续使用 `oh-my-dsh-slim@0.5.3`。** 中间版本需要升级 DSH。
+> native.3 已通过 89 项自动测试和五项隔离已安装宿主 smoke，用户接受中文待办网页的桌面委派复测为成功；
+> 尚未完成完整工具轨迹审计、浏览器或在线 MCP 验收。安装或更新后必须**完整重启 DSH**。
 
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
@@ -38,18 +39,22 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 **reported 不等于 settled**；正式结束通知后再整合。`subagent_result` 只读已结束子代理最终消息，
 不唤醒子代理、不消耗额外模型回合。
 
-## 安装本 fork（日后安装，随后重启）
+## 安装已发布版本（随后重启）
 
-桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在插件管理器的安装入口填写：
+桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。维护者发布此版本后，在管理器的安装入口填写固定版本：
 
 ```text
-github:Henry-916/oh-my-dsh-slim#feat/dsh-0.2-native
+oh-my-dsh-slim@0.6.1-native.3
 ```
 
-以下 CLI 命令仅适用于非桌面管理的 profile。使用 **fork 的 GitHub 分支**，不要用上游 npm 包或市场条目替代：
+本 PR 不会创建 npm 发布或 Git 标签。正式发布前，只使用维护者审查过的明确提交，
+不要替换为持续变动的开发分支。官方源码与发布标签见
+[ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim/releases)。
+
+以下 CLI 命令仅适用于非桌面管理的 profile，且需等待版本发布：
 
 ```bash
-dsh plugin --profile <profile> add github:Henry-916/oh-my-dsh-slim#feat/dsh-0.2-native
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1-native.3
 ```
 
 本地 checkout 也可：
@@ -65,10 +70,12 @@ dsh plugin --profile <profile> add ./oh-my-dsh-slim
 插件代码每宿主进程只挂载一次，仅新建会话不会加载更新代码。以上命令是操作说明，不代表本次已修改
 正在运行的用户安装。
 
-- **更新**：再次添加同一 fork 分支并重启；不要使用上游 `@latest` 来更新本 fork。
+- **更新**：从官方发布说明选择已发布的明确版本。rc.2 桌面管理器可能要求先卸载再安装；
+  请先备份设置，卸载时保留配置，完成后重启 DSH。
 - **卸载**：`dsh plugin --profile <profile> remove oh-my-dsh-slim`，然后重启。
   不会播种预设目录；移除包不承诺删除原生用户设置或保留的旧 JSON。
-- 本分支不承诺兼容 DSH 0.1.x；旧上游版本属于历史版本线，不是本分支安装路径。
+- **DSH ≤0.1.5：** 使用 `oh-my-dsh-slim@0.5.3`，按该历史版本的说明安装。
+  本原生版本线要求 DSH ≥0.2.0-rc.2；0.1.6/0.1.7 用户需要升级宿主。
 
 ## 原生预设与设置
 
@@ -153,6 +160,8 @@ npm test
 
 运行仓库的 `node --test test/*.test.mjs` **单元/契约测试**，涉及包结构、原生设置与导入安全、角色路由、
 请求/结果处理、生命周期及 MCP 作用域。mock 宿主、provider 与 MCP 的测试不是真实 provider 验收。
+历史对比基线随仓库收录于 `test/fixtures/upstream-v0.5.3/`，以固定原始 Git blob 哈希核验；
+测试不依赖 `.git` 或完整克隆历史。需要已安装宿主参照物的集成用例在参照物缺失时显示明确跳过原因。
 
 另行完成的**真实打包 DSH 0.2.0-rc.2 无网络 smoke 已通过**：使用已安装 ASAR 的 Electron 44 / Node 24，
 隔离 `DSH_HOME`，启动 dsh-base、原生预设 registry、伴生行与预设；角色 roster 及完整组合

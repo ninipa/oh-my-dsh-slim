@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { upstream as readUpstream } from './upstream-baseline.mjs';
 import yaml from 'js-yaml';
 import { plugins, definition } from '../npm-package/preset/preset.js';
 import { ROLE_TABLE, composeRolePersona, patchedContext, resolveRole } from '../npm-package/preset/roles.js';
@@ -10,13 +9,8 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// Read the immutable upstream source, never the fork's current copy. Keeping
-// this independent of fixture generation prevents accidentally blessing edits.
-const upstreamCommit = '1a29e706710b0a967021fa963ba607b0e683029e';
-const root = fileURLToPath(new URL('../', import.meta.url));
-const upstreamYaml = execFileSync('git', ['show', upstreamCommit + ':agent.cordis.yml'], {
-  cwd: root, encoding: 'utf8',
-});
+// Read the byte-verified immutable upstream source, never the fork's current copy.
+const upstreamYaml = readUpstream('agent.cordis.yml');
 const schema = yaml.DEFAULT_SCHEMA.extend(new yaml.Type('tag:yaml.org,2002:js', {
   kind: 'scalar', construct: expression => ({ __jsExpr: expression }),
 }));
@@ -27,9 +21,7 @@ const row = id => current.find(entry => entry.id === id);
 const original = id => upstream.find(entry => entry.id === id);
 
 test('preset metadata exactly matches the upstream preset declaration', () => {
-  const metadata = yaml.load(execFileSync('git', ['show', upstreamCommit + ':preset.yml'], {
-    cwd: root, encoding: 'utf8',
-  }));
+  const metadata = yaml.load(readUpstream('preset.yml'));
   for (const field of ['name', 'description', 'order']) assert.equal(definition[field], metadata[field]);
 });
 

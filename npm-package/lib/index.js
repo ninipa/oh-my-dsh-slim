@@ -21,7 +21,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { hostVerdict } from './host-version.js';
+import { assertHostCompatible } from './host-version.js';
 import { advertisedRoles, roleIds } from '../preset/roles.js';
 import { describeConfig, loadConfig, validateConfigDocument } from '../preset/config.js';
 import { buildConfigSchema, loadHostSchema, wireConfigSettings } from './config-settings.js';
@@ -59,6 +59,7 @@ function report(ctx, line) {
  * @param config - optional row config as documented above.
  */
 export function apply(ctx, config) {
+  const verdict = assertHostCompatible({ ctx });
   wireConfigSettings(ctx, { validate: validateConfigDocument });
   ctx.inject(['settings'], child => child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)));
   ctx.inject(['connection', 'webServer', 'agentPresets', 'configEditor', 'settings'], child => {
@@ -78,12 +79,8 @@ export function apply(ctx, config) {
   if (!Config) ctx.logger?.warn?.('oh-my-dsh-slim: host schemastery could not be resolved; native configuration form unavailable, legacy JSON remains active');
   const presetId = typeof config?.presetId === 'string' && config.presetId.length > 0 ? config.presetId : PRESET_ID;
   const verbose = config?.verbose === true;
-  const verdict = hostVerdict();
   report(ctx, `oh-my-dsh-slim: agent preset "${presetId}" is declared by this bundle (declarative preset; no directory is seeded)`);
   report(ctx, `oh-my-dsh-slim: host DSH ${verdict.host ?? 'unknown'} - ${verdict.status}`);
-  if (verdict.status === 'older' || verdict.status === 'directory' || verdict.status === 'legacy-preset-model') {
-    ctx.logger?.warn?.(`oh-my-dsh-slim: ${verdict.message}`);
-  }
   const roles = roleIds();
   report(ctx, `oh-my-dsh-slim: ${String(roles.length)} role tools: ${advertisedRoles()}`);
   try {

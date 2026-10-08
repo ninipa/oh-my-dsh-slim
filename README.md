@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**Henry-916 fork · 0.6.1-native.1 · branch `feat/dsh-0.2-native`**
+**oh-my-dsh-slim · 0.6.1-native.3 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -8,12 +8,14 @@ an orchestrator plus five enabled specialist roles, delivered as a **declarative
 preset**. It mounts from the plugin bundle; it is not a standalone application or a preset
 directory to copy.
 
-> **Tested target only: DSH 0.2.0-rc.2.** Other host versions are not verified by this fork.
-> Unit/contract tests and an actual packaged-host, no-network smoke are distinct validation
-> layers. After installing native.1, the user verified read-only delegation and settlement through
-> CPA with explorer/Qwen low, fixer/Gemini medium and oracle/GPT xhigh. **That is not regression
-> acceptance of this corrected release, nor proof of upstream reasoning levels or live MCP.**
-> This correction does not update the running desktop installation. Updating requires a **full DSH restart**.
+> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested host: DSH 0.2.0-rc.2.** Later 0.2 releases,
+> including rc.3 and 0.2.0 final, are admitted by the version gate, not claimed as tested.
+> Upgrade policy: retain compatibility within the 0.2 line while the required APIs remain available;
+> verify new host releases before claiming support. The 0.3 line requires a separate review.
+> **DSH ≤0.1.5: stay on `oh-my-dsh-slim@0.5.3`.** Hosts between that line and rc.2 must upgrade DSH.
+> Native.3 passed 89 automated tests and five isolated installed-host smoke checks. The user accepted
+> a desktop todo-page delegation retest as successful; full tool-trace, browser and live MCP
+> acceptance are not established. Updating requires a **full DSH restart**.
 
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
@@ -44,18 +46,22 @@ the orchestrator must not redo a running lane's work or claim completion from an
 A report is not a settlement. The runtime settlement notice allows integration; `subagent_result`
 reads a finished child's final message without waking it or consuming another model turn.
 
-## Install this fork (later, then restart)
+## Install a released version (then restart)
 
-The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this installation spec in the desktop plugin manager:
+The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. After the maintainer publishes this version, enter this pinned package spec:
 
 ```text
-github:Henry-916/oh-my-dsh-slim#feat/dsh-0.2-native
+oh-my-dsh-slim@0.6.1-native.3
 ```
 
-The CLI commands below apply only to non-desktop-managed profiles. Use the **fork GitHub branch**, not the upstream npm package or marketplace entry:
+This PR does not create an npm release or a Git tag. Until publication, use a maintainer-reviewed
+commit explicitly; do not substitute a moving development branch. Official source and release tags:
+[ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim/releases).
+
+The CLI commands below apply only to non-desktop-managed profiles, after publication:
 
 ```bash
-dsh plugin --profile <profile> add github:Henry-916/oh-my-dsh-slim#feat/dsh-0.2-native
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1-native.3
 ```
 
 For a local checkout instead:
@@ -73,13 +79,14 @@ in the native **Settings → Agent Presets** picker. Plugin code mounts once per
 creating another session alone does not load changed code. The command above is an instruction,
 not a claim that the running installation was changed during this work.
 
-- **Update:** add the same fork branch again, then restart DSH. Do not use upstream `@latest`
-  to update this fork.
+- **Update:** choose a published version from the official release notes and install that exact
+  version. In rc.2, the desktop manager may require uninstall/reinstall; back up settings first,
+  retain configuration when removing the package, and restart DSH.
 - **Uninstall:** `dsh plugin --profile <profile> remove oh-my-dsh-slim`, then restart DSH.
   No preset directory is seeded; user settings and the preserved legacy JSON are not promised
   to be deleted by package removal.
-- This native fork is not a compatibility promise for DSH 0.1.x. Older upstream releases are a
-  separate historical line, not the installation path for this branch.
+- **DSH ≤0.1.5:** use `oh-my-dsh-slim@0.5.3` and its historical installation instructions.
+  This native line requires DSH ≥0.2.0-rc.2; 0.1.6/0.1.7 users must upgrade the host.
 
 ## Native preset and settings
 
@@ -181,6 +188,9 @@ npm test
 This runs the repository's `node --test test/*.test.mjs` **unit/contract suites**, including
 packaging, settings/import safety, role routing, request/result handling, lifecycle and MCP scope.
 Mocked host/provider/MCP behavior is not a real-provider acceptance run.
+Historical comparison fixtures are vendored under `test/fixtures/upstream-v0.5.3/` and checked
+against pinned raw Git blob hashes; the suite does not require `.git` or full clone history.
+Installed-host integration cases skip with an explicit reason when their reference fixture is absent.
 
 An **actual packaged DSH 0.2.0-rc.2 no-network smoke passed separately**: Electron 44 / Node 24
 from the installed ASAR, with an isolated `DSH_HOME`, booted dsh-base, the native preset registry,

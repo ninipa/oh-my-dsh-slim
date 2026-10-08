@@ -6,11 +6,17 @@ package releases where applicable.
 
 ## [0.6.1-native.3] — continuable tool-filter fix
 
+PR review follow-up (same unreleased version):
+- Admit the bounded DSH 0.2 compatibility line instead of pinning rc.2; only rc.2 is currently host-tested.
+- Raise the runtime host floor to rc.2 with actionable guidance for older hosts before native registry access.
+- Replace development-branch installation examples with pinned official release instructions, explicitly pending publication.
+- Vendor byte-verified upstream baseline fixtures so tests work without Git history; preserve all historical archives.
+
 - Fix unknown tool names surviving the background delegation path: rc.2 `startContinuable` carries the filter under `spec.request.toolFilter`, not on the top-level spec. Filter both direct and nested request shapes without mutating stock requests or removing valid restrictions.
 - Correct the restrictable-tool lookup to the real rc.2 `tools.view(scope).restrictableNames` API. The former nonexistent `tools.restrictableNames()` call silently disabled filtering, and the test double incorrectly supplied it.
 - Extend actual rc.2 stock-tool execution regressions (direct and injected scopes, foreground and background starts) to exercise unknown `skill` entries in both allow and deny lists, plus actual ToolRuntime view/restrict execution and empty-allow preservation. The original native.2 acceptance did not cover this nested filter path; its successful smoke tests were not live delegation acceptance.
 - Verified 89/89 regressions with zero skipped. Isolated installed-ASAR smoke passes five explicit sentinels, including `NATIVE_TOOL_FILTER_START_PASS`, exercising the real installed ToolRuntime restriction API and scoped adapter request. This does not invoke a live provider.
-- Desktop reproduction and live-provider acceptance still require installing this fix and restarting DSH. No desktop files were updated. This candidate is available for installation testing; passing isolated checks does not establish live desktop delegation acceptance.
+- The user installed native.3, retested a Chinese todo-page task without delegation instructions, and accepted the desktop result as successful. This is user acceptance, not a full tool-trace audit or live MCP validation. The implementation checks did not modify desktop files.
 
 ## [0.6.1-native.2] — compatibility-only correction
 

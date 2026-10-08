@@ -1,0 +1,125 @@
+{
+  "preset": "my-dsh-normal",
+  "mcpServers": {
+    "context7": {
+      "transport": "streamable-http",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "gh_grep": {
+      "transport": "streamable-http",
+      "url": "https://mcp.grep.app"
+    }
+  },
+  "presets": {
+    "my-dsh-normal": {
+      "orchestrator": {
+        "effort": "max",
+        "mcps": []
+      },
+      "oracle": {
+        "enabled": true,
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-pro",
+        "effort": "max",
+        "deny": [
+          "edit",
+          "write",
+          "skill",
+          "job_kill",
+          "job_list",
+          "job_output",
+          "todo_write",
+          "ask_user_question"
+        ],
+        "mcps": []
+      },
+      "designer": {
+        "enabled": true,
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "effort": "high",
+        "deny": [
+          "skill",
+          "job_kill",
+          "job_list",
+          "job_output",
+          "todo_write",
+          "ask_user_question"
+        ],
+        "mcps": []
+      },
+      "fixer": {
+        "enabled": true,
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "effort": "high",
+        "deny": [
+          "skill",
+          "job_kill",
+          "job_list",
+          "job_output",
+          "todo_write",
+          "ask_user_question"
+        ],
+        "mcps": []
+      },
+      "explorer": {
+        "enabled": true,
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "effort": "low",
+        "deny": [
+          "edit",
+          "write",
+          "skill",
+          "job_kill",
+          "job_list",
+          "job_output",
+          "todo_write",
+          "ask_user_question"
+        ],
+        "mcps": []
+      },
+      "librarian": {
+        "enabled": true,
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "effort": "high",
+        "deny": [
+          "edit",
+          "write",
+          "skill",
+          "job_kill",
+          "job_list",
+          "job_output",
+          "todo_write",
+          "ask_user_question"
+        ],
+        "mcps": [
+          "context7",
+          "gh_grep"
+        ]
+      },
+      "observer": {
+        "enabled": false,
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-flash",
+        "effort": "high",
+        "deny": [
+          "edit",
+          "write",
+          "skill",
+          "job_kill",
+          "job_list",
+          "job_output",
+          "todo_write",
+          "ask_user_question"
+        ],
+        "mcps": []
+      }
+    }
+  },
+  "advanced": {
+    "roles": {}
+  }
+}

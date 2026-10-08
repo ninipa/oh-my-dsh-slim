@@ -1,0 +1,2 @@
+# Baseline Git blob assertions require original bytes on every platform.
+* -text
