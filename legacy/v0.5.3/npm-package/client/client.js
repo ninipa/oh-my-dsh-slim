@@ -875,7 +875,7 @@ window.__ModuleLoader__.load({
           // multi-level paths (presets.<preset>.<role>.<field>) go through
           // one atomic mutate(ops) — the documented replacement for the
           // 0.1.1 per-op scope.write (which is gone).
-          await scope.mutate(writeOps, snap.revision);
+          await scope.mutate(writeOps);
           setDraft(undefined);
           setToast({ text: doneText, icon: React.createElement(ui.IconCheckOutline16, { size: 14 }) });
         } finally {
@@ -1267,7 +1267,7 @@ window.__ModuleLoader__.load({
 
     // ----------------------------------------------------------------- apply
     const name = NS;
-    const inject = ['slots', 'locale', 'connection', 'remote', 'remote.session', 'configForms'];
+    const inject = ['slots', 'locale', 'connection', 'remote', 'remote.session'];
 
     function apply(ctx) {
       const gaps = missingPrimitives(ui);
@@ -1277,17 +1277,18 @@ window.__ModuleLoader__.load({
       }
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'oh-my-dsh-slim: dictionaries');
       const t = ctx.locale.bind(NS);
-      // rc.2 forms retain getSnapshot/subscribe/mutate, but their owner and
-      // page slot moved from settingsScope to configForms and plugins.item.
-      const scope = ctx.configForms.get(NS);
-      ctx.effect(() => ctx.configForms.whileServed([NS], () => ctx.slots.inject('plugins.item', () => ctx.slots.register({
-        name: 'plugins.item',
-        id: NS,
-        order: 100,
-        label: () => BUNDLED_PROFILE_NAME,
-        locale: NS,
-        inject: () => ({ t }),
-      }, () => React.createElement(SettingsCard, { t, scope, connection: ctx.connection, remote: ctx.remote })))), 'oh-my-dsh-slim: configuration card');
+      ctx.inject(['settingsScope'], (scoped) => {
+        const scope = scoped.settingsScope.bind({ namespace: NS });
+        scoped.slots.inject('settings.plugin.item', () => scoped.slots.register({
+          name: 'settings.plugin.item',
+          key: NS,
+          // Sort AFTER the built-in cards and other third-party cards (keyed
+          // slots order by ascending priority; everything else ships 0).
+          priority: 1,
+          locale: NS,
+          inject: () => ({ t }),
+        }, () => React.createElement(SettingsCard, { t, scope, connection: ctx.connection, remote: ctx.remote })));
+      });
     }
 
     exports.name = name;

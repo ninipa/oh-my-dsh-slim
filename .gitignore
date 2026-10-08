@@ -1,3 +1,10 @@
+# scratch space used while adapting to a new host release
+.tmp-*
+
+# generated into the published package by its `prepare` script
+npm-package/README.md
+npm-package/CHANGELOG.md
+
 # build/test artifacts
 node_modules/
 *.bak-*
