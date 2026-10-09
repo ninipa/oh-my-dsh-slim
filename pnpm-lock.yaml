@@ -11,6 +11,9 @@ importers:
       js-yaml:
         specifier: ^4.1.0
         version: 4.3.2
+      semver:
+        specifier: 7.7.2
+        version: 7.7.2
 
 packages:
 
@@ -21,6 +24,11 @@ packages:
     resolution: {integrity: sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA==}
     hasBin: true
 
+  semver@7.7.2:
+    resolution: {integrity: sha512-RF0Fw+rO5AMf9MAyaRXI4AV0Ulj5lMHqVxxdSgiVbixSCXoEmmX/jk0CuJw4+3SqroYO9VoUh+HcuJivvtJemA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
 snapshots:
 
   argparse@2.0.1: {}
@@ -28,3 +36,5 @@ snapshots:
   js-yaml@4.3.2:
     dependencies:
       argparse: 2.0.1
+
+  semver@7.7.2: {}

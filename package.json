@@ -18,6 +18,8 @@
   ],
   "exports": {
     ".": "./npm-package/lib/index.js",
+    "./preset": "./npm-package/preset/preset.js",
+    "./profile-registry": "./npm-package/lib/profile-registry.js",
     "./client": "./npm-package/client/client.js",
     "./package.json": "./package.json"
   },
@@ -40,7 +42,8 @@
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "semver": "7.7.2"
   },
   "engines": {
     "node": ">=20",

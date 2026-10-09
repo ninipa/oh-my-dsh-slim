@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import semver from 'semver';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import {
@@ -46,14 +46,8 @@ test('effective gate respects prerelease ordering and npm default prerelease adm
   assert.doesNotMatch(hostVerdict('0.3.0').message, /expected to be compatible/);
 });
 
-// npm ships semver, so verify actual npm acceptance without adding a plugin dependency.
-let semver;
-try {
-  semver = createRequire(import.meta.url)('semver');
-} catch {
-  try { semver = createRequire(join(dirname(process.execPath), 'node_modules', 'npm', 'package.json'))('semver'); } catch {}
-}
-test('actual npm semver admits rc.3 but not later-patch or 0.3 prereleases', { skip: !semver && 'npm semver not available' }, () => {
+// Pinned development-only dependency: this check must run on clean checkouts.
+test('actual npm semver admits rc.3 but not later-patch or 0.3 prereleases', () => {
   for (const version of [...admitted, ...rejected]) {
     assert.equal(semver.satisfies(version, range), hostVerdict(version).status === 'ok', version);
   }

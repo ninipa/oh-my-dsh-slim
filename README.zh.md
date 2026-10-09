@@ -11,7 +11,7 @@
 > 范围允许 rc.3、0.2.0 正式版及后续 0.2 稳定版本安装，不代表它们已通过测试。
 > 升级策略：所需 API 不变时维持 0.2 版本线兼容，验证新宿主后才宣称实测支持；0.3 版本线另行审查。
 > **DSH ≤0.1.5 请继续使用 `oh-my-dsh-slim@0.5.3`。** 中间版本需要升级 DSH。
-> native.3 已通过 89 项自动测试和五项隔离已安装宿主 smoke，用户接受中文待办网页的桌面委派复测为成功；
+> native.3 已通过 101 项自动测试和六项隔离已安装宿主基础组合 smoke，用户接受中文待办网页的桌面委派复测为成功；
 > 尚未完成完整工具轨迹审计、浏览器或在线 MCP 验收。安装或更新后必须**完整重启 DSH**。
 
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
@@ -162,6 +162,16 @@ npm test
 请求/结果处理、生命周期及 MCP 作用域。mock 宿主、provider 与 MCP 的测试不是真实 provider 验收。
 历史对比基线随仓库收录于 `test/fixtures/upstream-v0.5.3/`，以固定原始 Git blob 哈希核验；
 测试不依赖 `.git` 或完整克隆历史。需要已安装宿主参照物的集成用例在参照物缺失时显示明确跳过原因。
+`semver` 固定为开发依赖，版本范围交叉校验不再依赖 npm 自带副本。
+
+基础 smoke 直接调用 profile 后端，**不验证 `/omds` 的 HTTP 路由注册**。
+传输层验收可单独运行 `test/web-host-smoke.cjs`：将 `DSH_HOST_ANCHOR` 设为已安装 DSH 的绝对 JS 入口，
+使用该宿主 Node 运行时；打包 Electron 需 `ELECTRON_RUN_AS_NODE=1` 和 `--expose-internals`。
+它组合真实 `dsh-web-app`，使用隔离 home/profile 与回环临时端口，不替换当前 GUI。
+已安装 rc.2 的 web smoke 五项哨兵全通过：鉴权与 Host/Origin 栅栏、五个 profile RPC 方法及冲突处理、
+无效协议 envelope、完整重启后的持久化，以及路由卸载；两次启动均断言所有启用的宿主行处于 active 状态。
+测试使用实际发布包 patch；非客户端导出子入口避免重复客户端模块所有权。
+尚未验收浏览器视觉渲染、真实浏览器客户端执行或进行中的 HTTP 取消。
 
 另行完成的**真实打包 DSH 0.2.0-rc.2 无网络 smoke 已通过**：使用已安装 ASAR 的 Electron 44 / Node 24，
 隔离 `DSH_HOME`，启动 dsh-base、原生预设 registry、伴生行与预设；角色 roster 及完整组合
@@ -176,7 +186,7 @@ npm test
 - `early-close-context` 提供 running/reported/settled 事实与提醒，但不能强制模型等待或保证遵守。
 - `web_search` 使用宿主搜索服务，可能产生独立辅助模型费用。
 - 宿主模块从 loader 自身 base 与模块实例导入，涵盖打包桌面解析。
-  研究过 Lyrissonare 的 discovery workaround，但本 fork **不依赖该 fork 或其包**。
+  研究过 Lyrissonare 的 discovery workaround，但本包 **不依赖该 fork 或其包**。
 
 ## 署名与历史
 
@@ -184,10 +194,10 @@ npm test
   角色体系与 persona 来源。
 - [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim)：上游 DSH 移植。
 - [E2E-AK-OI/oh-my-dsh-slim](https://github.com/E2E-AK-OI/oh-my-dsh-slim)：通过 cherry-pick 引入的
-  native foundation，保留原作者署名。此为来源说明，不代表本 fork 完成了 E2E 验证。
+  native foundation，保留原作者署名。此为来源说明，不代表本次兼容性更新完成了 E2E 验证。
 - [Lyrissonare/oh-my-dsh-slim](https://github.com/Lyrissonare/oh-my-dsh-slim)：研究 discovery workaround，
   未引入运行时或包依赖。
-- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim)：当前原生 fork。
+- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim)：原生兼容性更新的贡献分支。
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：宿主平台。
 
-当前 fork 变更与明确标记的上游历史记录见 [CHANGELOG.md](./CHANGELOG.md)。许可证：[MIT](./LICENSE)。
+当前兼容性变更与明确标记的上游历史记录见 [CHANGELOG.md](./CHANGELOG.md)。许可证：[MIT](./LICENSE)。

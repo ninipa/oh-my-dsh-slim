@@ -4,10 +4,11 @@
 // patches point at it: the repository-root cordis.patch.yml (used by
 // `dsh plugin add github:...` and by a checkout added to dsh.profile.bundles)
 // and npm-package/cordis.patch.yml (used by the published npm package). Only
-// the `insert` row paths may differ between them; every other field must
-// match, or one install path silently ships a different preset than the other.
+// both patches use identical exported package specifiers. Only the root's
+// exports targets differ, or one install path silently ships a different preset.
 
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { sep } from 'node:path';
@@ -48,10 +49,28 @@ function loadPatch(relativePath) {
   return rows;
 }
 
-/** The repository patch addresses the same file one directory higher. */
-function packageRelative(name) {
-  return './' + name.replace(/^[.]\//, '').replace(/^npm-package\//, '');
-}
+test('only the companion uses the client-bearing root package; non-client rows use exported subpaths', () => {
+  const expected = ['oh-my-dsh-slim/preset', 'oh-my-dsh-slim/profile-registry', 'oh-my-dsh-slim'];
+  for (const patch of ['cordis.patch.yml', 'npm-package/cordis.patch.yml']) {
+    assert.deepEqual(loadPatch(patch).map(row => row.name), expected);
+  }
+  for (const manifestPath of ['package.json', 'npm-package/package.json']) {
+    const manifest = JSON.parse(readFileSync(join(root, manifestPath), 'utf8'));
+    const prefix = manifestPath.startsWith('npm-package/') ? './' : './npm-package/';
+    assert.equal(manifest.exports['.'], prefix + 'lib/index.js');
+    assert.equal(manifest.exports['./preset'], prefix + 'preset/preset.js');
+    assert.equal(manifest.exports['./profile-registry'], prefix + 'lib/profile-registry.js');
+    const manifestDir = dirname(join(root, manifestPath));
+    const requirePackage = createRequire(join(root, manifestPath));
+    for (const name of expected) {
+      // Self-reference resolution anchored at each manifest uses Node's actual
+      // export map, ensuring repository and published roots resolve same code.
+      const target = manifest.exports[name === manifest.name ? '.' : './' + name.slice(manifest.name.length + 1)];
+      assert.ok(target);
+      assert.equal(requirePackage.resolve(name), join(manifestDir, target));
+    }
+  }
+});
 
 test('both bundle patches declare the same preset row', () => {
   const repo = loadPatch('cordis.patch.yml');
@@ -60,7 +79,7 @@ test('both bundle patches declare the same preset row', () => {
   for (const [index, row] of repo.entries()) {
     const mirror = published[index];
     assert.equal(mirror.id, row.id);
-    assert.equal(mirror.name, packageRelative(row.name), 'row ' + row.id + ': package-relative name');
+    assert.equal(mirror.name, row.name, 'row ' + row.id + ': exported package identity');
     assert.deepEqual(mirror.config ?? null, row.config ?? null, 'row ' + row.id + ': config');
     assert.deepEqual(mirror.disabled ?? null, row.disabled ?? null, 'row ' + row.id + ': disabled');
   }
@@ -76,7 +95,7 @@ test('both bundle patches declare the same preset row', () => {
 async function loadPresetDeclaration() {
   const rows = loadPatch('npm-package/cordis.patch.yml');
   const row = rows.find((candidate) => candidate.id === 'preset-oh-my-dsh-slim');
-  assert.equal(row.name, './preset/preset.js');
+  assert.equal(row.name, 'oh-my-dsh-slim/preset');
   const module = await import(pathToFileURL(join(root, 'npm-package', 'preset', 'preset.js')).href);
   assert.equal(typeof module.apply, 'function', 'preset.js must export the plugin apply() a row can mount');
   assert.deepEqual(module.inject, ['agentPresets', 'loader'], 'preset.js registers through the preset registry service');

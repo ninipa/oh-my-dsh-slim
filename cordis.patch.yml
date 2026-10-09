@@ -18,13 +18,15 @@
 # import(), so this row may name a .js file (or a bare package) but never a .yml
 # one. preset.js returns the same bundle patch shape this file has.
 #
-# The shipped npm package (oh-my-dsh-slim on npmjs, built from npm-package/)
-# carries the same declaration one directory lower; test/package.test.mjs
-# verifies that the two stay in step.
+# Exported subpaths mark preset/registry rows as non-client modules; only the
+# bare root companion contributes the package's browser module. This prevents
+# multiple active client sources from the same package on a full web host.
+# The shipped npm package carries the same declaration; test/package.test.mjs
+# verifies that the two export maps resolve the same source modules.
 - insert:
     - id: preset-oh-my-dsh-slim
-      name: './npm-package/preset/preset.js'
+      name: 'oh-my-dsh-slim/preset'
     - id: oh-my-dsh-slim-profiles
-      name: './npm-package/lib/profile-registry.js'
+      name: 'oh-my-dsh-slim/profile-registry'
     - id: oh-my-dsh-slim
-      name: './npm-package/lib/index.js'
+      name: 'oh-my-dsh-slim'

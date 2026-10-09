@@ -13,7 +13,7 @@ directory to copy.
 > Upgrade policy: retain compatibility within the 0.2 line while the required APIs remain available;
 > verify new host releases before claiming support. The 0.3 line requires a separate review.
 > **DSH ≤0.1.5: stay on `oh-my-dsh-slim@0.5.3`.** Hosts between that line and rc.2 must upgrade DSH.
-> Native.3 passed 89 automated tests and five isolated installed-host smoke checks. The user accepted
+> Native.3 passed 101 automated tests and six base-composition installed-host smoke checks. The user accepted
 > a desktop todo-page delegation retest as successful; full tool-trace, browser and live MCP
 > acceptance are not established. Updating requires a **full DSH restart**.
 
@@ -191,6 +191,19 @@ Mocked host/provider/MCP behavior is not a real-provider acceptance run.
 Historical comparison fixtures are vendored under `test/fixtures/upstream-v0.5.3/` and checked
 against pinned raw Git blob hashes; the suite does not require `.git` or full clone history.
 Installed-host integration cases skip with an explicit reason when their reference fixture is absent.
+`semver` is a pinned development dependency: its version-range cross-check does not depend on npm's bundled copy.
+
+The base smoke directly invokes profile endpoints and **does not validate `/omds` HTTP registration**.
+For opt-in transport acceptance, run `test/web-host-smoke.cjs` with `DSH_HOST_ANCHOR` set to an
+absolute installed DSH JS entry, using that host's Node runtime (packaged Electron needs
+`ELECTRON_RUN_AS_NODE=1` and `--expose-internals`). It mounts the real `dsh-web-app` bundle with
+an isolated home/profile and a loopback ephemeral port; it does not replace the running GUI.
+The installed rc.2 web smoke passed all five sentinels: authentication and Host/Origin fencing,
+all five profile RPC methods and conflict handling, invalid wire envelopes, persistence across
+full restart, and route disposal. Both boots assert every enabled host row is active.
+It uses the actual published patch; exported non-client subpaths prevent duplicate client-module
+ownership. Visual browser rendering, actual browser client execution and in-flight cancellation
+are not acceptance-tested.
 
 An **actual packaged DSH 0.2.0-rc.2 no-network smoke passed separately**: Electron 44 / Node 24
 from the installed ASAR, with an isolated `DSH_HOME`, booted dsh-base, the native preset registry,
@@ -211,7 +224,7 @@ Additional limits:
 - `web_search` uses the host search service and may incur independent auxiliary-model charges.
 - Host imports use the host loader's own module base and module instances, including packaged
   desktop resolution. The Lyrissonare discovery workaround was studied as a reference;
-  **it is not a dependency** of this fork.
+  **it is not a dependency** of this package.
 
 ## Attribution and history
 
@@ -220,11 +233,11 @@ Additional limits:
 - [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim): upstream DSH port.
 - [E2E-AK-OI/oh-my-dsh-slim](https://github.com/E2E-AK-OI/oh-my-dsh-slim): native-foundation
   changes incorporated by cherry-pick, with original attribution preserved. This credit is
-  provenance, not a claim of E2E validation by this fork.
+  provenance, not a claim of E2E validation by this compatibility update.
 - [Lyrissonare/oh-my-dsh-slim](https://github.com/Lyrissonare/oh-my-dsh-slim): host discovery
   workaround studied; no runtime or package dependency introduced.
-- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim): this native fork.
+- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim): contributor branch for the native compatibility update.
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): host platform.
 
-See [CHANGELOG.md](./CHANGELOG.md) for current fork changes and explicitly historical upstream
+See [CHANGELOG.md](./CHANGELOG.md) for current compatibility changes and explicitly historical upstream
 release notes. License: [MIT](./LICENSE).

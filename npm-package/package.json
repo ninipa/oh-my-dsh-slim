@@ -30,6 +30,8 @@
   },
   "exports": {
     ".": "./lib/index.js",
+    "./preset": "./preset/preset.js",
+    "./profile-registry": "./lib/profile-registry.js",
     "./package.json": "./package.json",
     "./client": "./client/client.js"
   },

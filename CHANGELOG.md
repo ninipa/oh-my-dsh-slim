@@ -6,7 +6,13 @@ package releases where applicable.
 
 ## [0.6.1-native.3] — continuable tool-filter fix
 
-PR review follow-up (same unreleased version):
+Second PR review follow-up (same unreleased version):
+- Fix `/omds` route ownership: call the exported native connection registration method with the injected companion child as explicit owner, preserving the host authentication fence, RPC protocol and route cleanup. The former `rpc.handle` captured a provider context without `webServer` injection.
+- Add focused transport lifecycle tests and opt-in full web-composition HTTP smoke; the former base-only smoke called profile endpoints directly and did not validate the transport layer.
+- Give the unchanged preset/profile-registry plugins exported package subpaths and keep only the companion on the package-root entry. rc.2 client-module discovery rejects multiple path-based Loader sources for one `dsh.client` package during a full web restart; explicit non-client subpaths avoid duplicate client ownership without changing plugin implementations.
+- Pin development-only `semver` and require its npm-acceptance cross-check on clean checkouts; remove remaining canonical-repository fork wording.
+
+First PR review follow-up (same unreleased version):
 - Admit the bounded DSH 0.2 compatibility line instead of pinning rc.2; only rc.2 is currently host-tested.
 - Raise the runtime host floor to rc.2 with actionable guidance for older hosts before native registry access.
 - Replace development-branch installation examples with pinned official release instructions, explicitly pending publication.

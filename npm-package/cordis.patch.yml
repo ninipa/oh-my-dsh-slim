@@ -1,7 +1,8 @@
 # oh-my-dsh-slim bundle patch (published package)
 #
-# Same declaration as the repository-root cordis.patch.yml, with paths relative
-# to this package root instead of the repository root: when the package is
+# Same declaration as the repository-root cordis.patch.yml. Exported package
+# subpaths keep non-client rows out of the host's client-package scan, while
+# the bare root companion declares the client once. When the package is
 # installed with (after publication by ninipa/oh-my-dsh-slim)
 #   dsh plugin --profile <non-desktop-profile> add oh-my-dsh-slim@0.6.1-native.3
 # Use the desktop plugin manager for desktop installs. Before publication,
@@ -12,8 +13,8 @@
 # root copy in step.
 - insert:
     - id: preset-oh-my-dsh-slim
-      name: './preset/preset.js'
+      name: 'oh-my-dsh-slim/preset'
     - id: oh-my-dsh-slim-profiles
-      name: './lib/profile-registry.js'
+      name: 'oh-my-dsh-slim/profile-registry'
     - id: oh-my-dsh-slim
-      name: './lib/index.js'
+      name: 'oh-my-dsh-slim'

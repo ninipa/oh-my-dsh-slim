@@ -22,6 +22,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { assertHostCompatible } from './host-version.js';
+import { registerProfileTransport } from './profile-transport.js';
 import { advertisedRoles, roleIds } from '../preset/roles.js';
 import { describeConfig, loadConfig, validateConfigDocument } from '../preset/config.js';
 import { buildConfigSchema, loadHostSchema, wireConfigSettings } from './config-settings.js';
@@ -62,12 +63,12 @@ export function apply(ctx, config) {
   const verdict = assertHostCompatible({ ctx });
   wireConfigSettings(ctx, { validate: validateConfigDocument });
   ctx.inject(['settings'], child => child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)));
-  ctx.inject(['connection', 'webServer', 'agentPresets', 'configEditor', 'settings'], child => {
+  ctx.inject(['loader', 'connection', 'webServer', 'agentPresets', 'configEditor', 'settings'], async child => {
     const endpoints = makeProfileEndpoints({ agentPresets: child.agentPresets, getSettings: () => child.settings, getEditor: () => child.configEditor });
     const methods = { 'profile-list': 'list', 'profile-create': 'create', 'profile-save': 'save', 'profile-set-default': 'setDefault', 'profile-migrate': 'migrate' };
-    // The native channel owns its effect and enforces host/origin/browser-auth
-    // admission, yielding the host's single authenticated OperatorPeer.
-    child.connection.rpc.handle('/omds', async (endpoint, payload, signal, peer) => {
+    // Reuse the host RPC implementation, but explicitly own the route on the
+    // child that injected webServer (not the connection provider's fiber).
+    await registerProfileTransport(child, async (endpoint, payload, signal, peer) => {
       try {
         if (signal?.aborted) throw Object.assign(new Error('operation aborted'), { code: 'ABORT_ERR' });
         const method = methods[endpoint];
