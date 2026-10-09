@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.6.1-native.3 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.6.1 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -13,9 +13,11 @@ directory to copy.
 > Upgrade policy: retain compatibility within the 0.2 line while the required APIs remain available;
 > verify new host releases before claiming support. The 0.3 line requires a separate review.
 > **DSH ≤0.1.5: stay on `oh-my-dsh-slim@0.5.3`.** Hosts between that line and rc.2 must upgrade DSH.
-> Native.3 passed 101 automated tests and six base-composition installed-host smoke checks. The user accepted
-> a desktop todo-page delegation retest as successful; full tool-trace, browser and live MCP
-> acceptance are not established. Updating requires a **full DSH restart**.
+> 0.6.1 passed 101 automated tests, six base-composition installed-host smoke sentinels, and the five
+> web-composition transport sentinels; the web smoke was independently reproduced on a plain npm/CLI
+> host. The user accepted a desktop todo-page delegation retest as successful; full tool-trace,
+> browser rendering and live MCP acceptance are not established. Updating requires a **full DSH
+> restart**.
 
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
@@ -48,26 +50,27 @@ reads a finished child's final message without waking it or consuming another mo
 
 ## Install a released version (then restart)
 
-The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. After the maintainer publishes this version, enter this pinned package spec:
+The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.6.1-native.3
+oh-my-dsh-slim@0.6.1
 ```
 
-This PR does not create an npm release or a Git tag. Until publication, use a maintainer-reviewed
-commit explicitly; do not substitute a moving development branch. Official source and release tags:
-[ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim/releases).
+Install by exact version from the release notes rather than a moving tag, and never substitute a
+moving development branch. 0.6.1 is the DSH 0.2 line; DSH ≤0.1.5 users stay on 0.5.3. Official
+source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim/releases).
 
-The CLI commands below apply only to non-desktop-managed profiles, after publication:
+The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1-native.3
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1
 ```
 
-For a local checkout instead:
+For a local checkout instead, install the repository root — its export map serves the same modules
+as the published package:
 
 ```bash
-dsh plugin --profile <profile> add ./oh-my-dsh-slim
+dsh plugin --profile <profile> add /path/to/oh-my-dsh-slim
 ```
 
 `dsh plugin` installs into `$DSH_HOME/profiles/<profile>/` and reconciles the package into the
@@ -86,15 +89,24 @@ not a claim that the running installation was changed during this work.
   No preset directory is seeded; user settings and the preserved legacy JSON are not promised
   to be deleted by package removal.
 - **DSH ≤0.1.5:** use `oh-my-dsh-slim@0.5.3` and its historical installation instructions.
-  This native line requires DSH ≥0.2.0-rc.2; 0.1.6/0.1.7 users must upgrade the host.
+  This 0.6.x line requires DSH ≥0.2.0-rc.2; 0.1.6/0.1.7 users must upgrade the host.
+
+## Repository layout
+
+- repository root: the package manifest used when installing a local checkout; its export map
+  serves the same modules as the published package;
+- `npm-package/`: the published package content — what npm receives;
+- `test/`: unit/contract suites plus the two opt-in installed-host smokes;
+- `legacy/v0.5.3/`: the historical directory-preset line, kept for comparison fixtures.
 
 ## Native preset and settings
 
 The bundle patch declares `preset-oh-my-dsh-slim`, an `@deepseek-ai/dsh-agent-preset` row,
 and the profile-plane companion `omds-seeder`. The preset's `config.plugins` is its plugin list.
-Package-local rows use absolute `file:` URLs constructed from `import.meta.url`, avoiding
-relative-path resolution against the declaring patch. No `$DSH_HOME/.agent-presets/` directory
-is created.
+Rows name exported package subpaths (`oh-my-dsh-slim/preset`, `oh-my-dsh-slim/profile-registry`,
+`oh-my-dsh-slim`), so the host resolves them through the package's export map; only the package
+root entry contributes the browser client module. No `$DSH_HOME/.agent-presets/` directory is
+created.
 
 The companion declares a host-native `Config` schema with volatile editable fields. The settings
 service describes these fields and persists updates in the active profile. **This does not establish
@@ -230,13 +242,14 @@ Additional limits:
 
 - [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) (MIT © 2025
   alvinunreal): role system and persona source.
-- [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim): upstream DSH port.
+- [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim): upstream DSH port (this repository).
 - [E2E-AK-OI/oh-my-dsh-slim](https://github.com/E2E-AK-OI/oh-my-dsh-slim): native-foundation
   changes incorporated by cherry-pick, with original attribution preserved. This credit is
   provenance, not a claim of E2E validation by this compatibility update.
 - [Lyrissonare/oh-my-dsh-slim](https://github.com/Lyrissonare/oh-my-dsh-slim): host discovery
   workaround studied; no runtime or package dependency introduced.
-- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim): contributor branch for the native compatibility update.
+- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim): contributor of the
+  0.6.x native-compatibility update (merged as PR #3).
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): host platform.
 
 See [CHANGELOG.md](./CHANGELOG.md) for current compatibility changes and explicitly historical upstream

@@ -4,9 +4,14 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
-## [0.6.1-native.3] — continuable tool-filter fix
+## [0.6.1] — continuable tool-filter fix
 
-Second PR review follow-up (same unreleased version):
+Released as `0.6.1`; the contributor's `0.6.1-native.1/2/3` labels were pre-release iterations of
+this same release. Independently reproduced on an isolated DSH 0.2.0-rc.2 host installed through
+plain npm/CLI: preset roster and settings entry, `/omds` HTTP list/create/set-default plus restart
+persistence, 101 tests, and both installed-host smokes.
+
+Second review follow-up:
 - Fix `/omds` route ownership: call the exported native connection registration method with the injected companion child as explicit owner, preserving the host authentication fence, RPC protocol and route cleanup. The former `rpc.handle` captured a provider context without `webServer` injection.
 - Add focused transport lifecycle tests and opt-in full web-composition HTTP smoke; the former base-only smoke called profile endpoints directly and did not validate the transport layer.
 - Give the unchanged preset/profile-registry plugins exported package subpaths and keep only the companion on the package-root entry. rc.2 client-module discovery rejects multiple path-based Loader sources for one `dsh.client` package during a full web restart; explicit non-client subpaths avoid duplicate client ownership without changing plugin implementations.

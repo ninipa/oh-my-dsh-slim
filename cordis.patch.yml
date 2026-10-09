@@ -6,7 +6,7 @@
 # $DSH_HOME/.agent-presets and nothing is copied at runtime.
 #
 # Install:
-#   dsh plugin --profile <non-desktop-profile> add oh-my-dsh-slim@0.6.1-native.3
+#   dsh plugin --profile <non-desktop-profile> add oh-my-dsh-slim@0.6.1
 # Use this spec after publication by ninipa/oh-my-dsh-slim; before release,
 # install an explicitly reviewed commit, never a moving development branch.
 # Desktop installs/updates are managed only through its plugin manager.

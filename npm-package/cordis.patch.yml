@@ -4,7 +4,7 @@
 # subpaths keep non-client rows out of the host's client-package scan, while
 # the bare root companion declares the client once. When the package is
 # installed with (after publication by ninipa/oh-my-dsh-slim)
-#   dsh plugin --profile <non-desktop-profile> add oh-my-dsh-slim@0.6.1-native.3
+#   dsh plugin --profile <non-desktop-profile> add oh-my-dsh-slim@0.6.1
 # Use the desktop plugin manager for desktop installs. Before publication,
 # use an explicitly reviewed commit, not a moving development branch.
 # The loader appends these rows and the preset mounts with the rest of the tree.

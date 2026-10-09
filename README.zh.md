@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.6.1-native.3 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.6.1 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -11,8 +11,9 @@
 > 范围允许 rc.3、0.2.0 正式版及后续 0.2 稳定版本安装，不代表它们已通过测试。
 > 升级策略：所需 API 不变时维持 0.2 版本线兼容，验证新宿主后才宣称实测支持；0.3 版本线另行审查。
 > **DSH ≤0.1.5 请继续使用 `oh-my-dsh-slim@0.5.3`。** 中间版本需要升级 DSH。
-> native.3 已通过 101 项自动测试和六项隔离已安装宿主基础组合 smoke，用户接受中文待办网页的桌面委派复测为成功；
-> 尚未完成完整工具轨迹审计、浏览器或在线 MCP 验收。安装或更新后必须**完整重启 DSH**。
+> 0.6.1 已通过 101 项自动测试、六项隔离已安装宿主基础组合 smoke，以及 web 组合传输层五项哨兵
+> （web smoke 已在普通 npm/CLI 宿主上独立复现）。用户接受中文待办网页的桌面委派复测为成功；
+> 尚未完成完整工具轨迹审计、浏览器渲染或在线 MCP 验收。安装或更新后必须**完整重启 DSH**。
 
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
@@ -41,26 +42,26 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 
 ## 安装已发布版本（随后重启）
 
-桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。维护者发布此版本后，在管理器的安装入口填写固定版本：
+桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.6.1-native.3
+oh-my-dsh-slim@0.6.1
 ```
 
-本 PR 不会创建 npm 发布或 Git 标签。正式发布前，只使用维护者审查过的明确提交，
-不要替换为持续变动的开发分支。官方源码与发布标签见
+请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
+0.6.1 属于 DSH 0.2 版本线；DSH ≤0.1.5 用户继续留在 0.5.3。官方源码与发布标签见
 [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim/releases)。
 
-以下 CLI 命令仅适用于非桌面管理的 profile，且需等待版本发布：
+以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1-native.3
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1
 ```
 
-本地 checkout 也可：
+本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：
 
 ```bash
-dsh plugin --profile <profile> add ./oh-my-dsh-slim
+dsh plugin --profile <profile> add /path/to/oh-my-dsh-slim
 ```
 
 `dsh plugin` 安装到 `$DSH_HOME/profiles/<profile>/`，并归并进 profile 的 `dsh.profile.bundles`
@@ -75,13 +76,21 @@ dsh plugin --profile <profile> add ./oh-my-dsh-slim
 - **卸载**：`dsh plugin --profile <profile> remove oh-my-dsh-slim`，然后重启。
   不会播种预设目录；移除包不承诺删除原生用户设置或保留的旧 JSON。
 - **DSH ≤0.1.5：** 使用 `oh-my-dsh-slim@0.5.3`，按该历史版本的说明安装。
-  本原生版本线要求 DSH ≥0.2.0-rc.2；0.1.6/0.1.7 用户需要升级宿主。
+  本 0.6.x 版本线要求 DSH ≥0.2.0-rc.2；0.1.6/0.1.7 用户需要升级宿主。
+
+## 仓库结构
+
+- 仓库根：本地 checkout 安装时使用的包清单，其 export map 提供与发布包相同的模块；
+- `npm-package/`：发布包内容（npm 实际收到的就是这个目录）；
+- `test/`：单元/契约测试，以及两套可选的已安装宿主 smoke；
+- `legacy/v0.5.3/`：历史目录式预设线，保留用于对比基线。
 
 ## 原生预设与设置
 
 组合包补丁声明 `preset-oh-my-dsh-slim`（`@deepseek-ai/dsh-agent-preset` 行）与 profile 平面的
-伴生行 `omds-seeder`。预设的 `config.plugins` 就是其插件列表。包内行使用由 `import.meta.url`
-构造的绝对 `file:` URL，避免相对路径按声明补丁解析导致的静默失效。
+伴生行 `omds-seeder`。预设的 `config.plugins` 就是其插件列表。各行以包的导出子路径命名
+（`oh-my-dsh-slim/preset`、`oh-my-dsh-slim/profile-registry`、`oh-my-dsh-slim`），由宿主的
+export map 解析；只有包根入口贡献浏览器客户端模块。
 不会创建 `$DSH_HOME/.agent-presets/` 目录。
 
 伴生行声明带 volatile 可编辑字段的宿主原生 `Config` schema，设置服务可描述并将修改持久化到当前
@@ -192,12 +201,12 @@ npm test
 
 - [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)（MIT © 2025 alvinunreal）：
   角色体系与 persona 来源。
-- [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim)：上游 DSH 移植。
+- [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim)：上游 DSH 移植（本仓库）。
 - [E2E-AK-OI/oh-my-dsh-slim](https://github.com/E2E-AK-OI/oh-my-dsh-slim)：通过 cherry-pick 引入的
   native foundation，保留原作者署名。此为来源说明，不代表本次兼容性更新完成了 E2E 验证。
 - [Lyrissonare/oh-my-dsh-slim](https://github.com/Lyrissonare/oh-my-dsh-slim)：研究 discovery workaround，
   未引入运行时或包依赖。
-- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim)：原生兼容性更新的贡献分支。
+- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim)：0.6.x 原生兼容性更新的贡献者（已作为 PR #3 合并）。
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：宿主平台。
 
 当前兼容性变更与明确标记的上游历史记录见 [CHANGELOG.md](./CHANGELOG.md)。许可证：[MIT](./LICENSE)。

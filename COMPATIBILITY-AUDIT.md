@@ -1,5 +1,8 @@
 # Compatibility correction audit — 0.6.1-native.2
 
+> Version labels: this release is published as `0.6.1`; `0.6.1-native.1/2/3` were the contributor's
+> pre-release iteration labels used during review. Historical references below keep those labels.
+
 Baseline: ninipa/oh-my-dsh-slim `1a29e706710b0a967021fa963ba607b0e683029e` (0.5.3).
 Target: installed DSH 0.2.0-rc.2 only.
 
