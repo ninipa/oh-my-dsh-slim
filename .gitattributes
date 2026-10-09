@@ -1,0 +1,2 @@
+# Historical blobs retain their original bytes, including line endings.
+legacy/v0.5.3/** -text

@@ -1,748 +1,103 @@
-// oh-my-dsh-slim preset seeder (host half, zero dependencies).
+// oh-my-dsh-slim — the bundle's companion row.
 //
-// Ships a full copy of the oh-my-dsh-slim agent preset under `preset/` and
-// materializes it into `<DSH_HOME>/.agent-presets/oh-my-dsh-slim` on mount:
+// DSH 0.2.0 replaced directory agent presets (a folder plus preset.yml under
+// $DSH_HOME/.agent-presets) with declarative ones: a bundle patch inserts an
+// `@deepseek-ai/dsh-agent-preset` row whose `config.plugins` IS the preset's
+// plugin list. Everything this package ships is therefore declared in
+// `preset/preset.js`, mounted by the loader before any session exists —
+// there is nothing left to copy into DSH_HOME, and nothing to clean up on
+// uninstall either.
 //
-//   target absent                      → seed bundled preset + write marker
-//   target has .git                    → untouched (user manages updates via git)
-//   target without a seed marker       → untouched (manually installed; never
-//                                        overwrite directories of unknown origin)
-//   marker older than bundled version  → backup old dir to <name>.bak-<stamp>,
-//                                        re-seed, refresh marker
-//   marker same/newer                  → nothing to do
+// The companion reports registration and declares the native settings form.
+// User-document fields are volatile: DSH persists edits into the active profile
+// without remounting this row. A legacy JSON document may seed an empty user
+// layer, but its original file is never modified. Named native profiles are
+// authored through /omds and persisted by the separate nonvolatile registry row.
 //
-// The preset directory is MANAGED CONTENT. The sanctioned customization
-// channel is the user configuration, read by the preset's config-loader from
-// the host settings namespace "oh-my-dsh-slim" (registered here when the
-// optional @deepseek-ai/schemastery peer resolves) or, on hosts without a
-// settings service, from <DSH_HOME>/oh-my-dsh-slim.json. On first boot with a
-// settings service a legacy JSON file is imported into the namespace and
-// archived as oh-my-dsh-slim.json.imported-<stamp>; hand edits inside the
-// preset directory survive only through the timestamped backup.
-//
-// Multi-preset profiles: the /omds RPC (registered here, called by the
-// browser half of this package) implements profile-list / profile-create /
-// profile-save / profile-set-default against DSH's native agent-presets
-// authoring API. A profile IS a native preset directory: create copies the
-// bundled preset under a generated stable id with a user-given display name,
-// then writes the profile's configuration snapshot (profile.json) beside the
-// copy. The preset's own config-loader reads that snapshot from its own
-// directory, which is what keeps per-preset configurations isolated — no
-// global profile map, no cross-session leakage. The native "default for new
-// sessions" is DSH's own agent-presets settings document, so this card and
-// DSH's preset picker always agree.
-//
-// Uninstalling this npm package does NOT remove seeded preset directories.
+// Config (all optional, so the bundle row mounts with an empty config):
+//   presetId: id to report. Default PRESET_ID.
+//   verbose:  log the full per-role table on every boot. Default false.
 
-import { createHash } from 'node:crypto';
-import {
-  copyFileSync,
-  cpSync,
-  existsSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-import { SETTINGS_NS, buildSettingsSchema } from '../preset/settings-schema.js';
-import { validateConfigDocument } from '../preset/config-loader.js';
-import { MIN_HOST_VERSION, MAX_HOST_VERSION_EXCLUSIVE, compareSemver, detectHostDshVersion } from '../preset/host-version.js';
+import { assertHostCompatible } from './host-version.js';
+import { registerProfileTransport } from './profile-transport.js';
+import { advertisedRoles, roleIds } from '../preset/roles.js';
+import { describeConfig, loadConfig, validateConfigDocument } from '../preset/config.js';
+import { buildConfigSchema, loadHostSchema, wireConfigSettings } from './config-settings.js';
+import { hostBaseUrl } from '../preset/bridge.js';
+import { makeProfileEndpoints } from './profile-registry.js';
+export { makeProfileEndpoints, normalizeDisplayName, profileIdForDisplayName } from './profile-registry.js';
 
-export const name = 'omds-preset-seeder';
+// Config is read before a Cordis context exists. Reach the host's own schema
+// instance through its Node resolution anchor, never a profile-local duplicate.
+const schemastery = await loadHostSchema({ hostBase: hostBaseUrl() });
+export const Config = schemastery ? buildConfigSchema(schemastery) : undefined;
 
-const PRESET_DIR_NAME = 'oh-my-dsh-slim';
-const MARKER_FILE = '.omds-seed.json';
-const PROFILE_CONFIG_NAME = 'profile.json';
-const COMPOSITION_NAME = 'agent.cordis.yml';
-// Backup suffix written beside a composition before the 0.1.5 persona
-// migration rewrites it (never overwritten silently twice: an existing backup
-// is left as-is so the oldest hand-authored file survives).
-const PERSONA_BACKUP_SUFFIX = '.bak-pre-015-persona';
-const PROFILE_ID_PREFIX = 'profile-';
-const PROFILE_ID_HASH_LENGTH = 12;
-const MAX_DISPLAY_NAME_LENGTH = 64;
-// The settings namespace DSH itself registers for the chosen default preset
-// ($DSH_HOME/settings.yaml, section "agent-presets").
-const NATIVE_DEFAULT_NS = 'agent-presets';
-const bundledDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'preset');
-const bundledVersion = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
-).version;
-const bundledDefaults = JSON.parse(readFileSync(join(bundledDir, 'defaults.json'), 'utf8'));
+export const name = 'omds-seeder';
 
-/** Validate and normalize the one field accepted by the new-profile flow. */
-export function normalizeDisplayName(value) {
-  if (typeof value !== 'string') throw new TypeError('profile display name must be a string');
-  const name = value.trim();
-  if (name.length === 0) throw new TypeError('profile display name must not be empty');
-  if (name.length > MAX_DISPLAY_NAME_LENGTH) {
-    throw new RangeError(`profile display name must be at most ${MAX_DISPLAY_NAME_LENGTH} characters`);
-  }
-  return name;
+const PRESET_ID = 'oh-my-dsh-slim';
+const CONFIG_FILE_NAME = 'oh-my-dsh-slim.json';
+
+/** Resolve DSH_HOME the way the host does, without importing host code. */
+function dshHome() {
+  const configured = process.env.DSH_HOME;
+  if (typeof configured === 'string' && configured.length > 0) return configured;
+  return join(homedir(), '.dsh');
 }
 
 /**
- * Generate a stable native preset id from UTF-8 display text without a new
- * dependency. The readable ASCII portion is only a hint; the hash is the
- * identity and prevents collisions between non-ASCII names.
+ * Log one report line, preferring the row logger over stderr.
  */
-export function profileIdForDisplayName(value) {
-  const name = normalizeDisplayName(value);
-  const prefix = name.normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Za-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase()
-    .slice(0, 24) || 'profile';
-  const hash = createHash('sha256').update(name, 'utf8').digest('hex').slice(0, PROFILE_ID_HASH_LENGTH);
-  return `${PROFILE_ID_PREFIX}${prefix}-${hash}`;
-}
-
-/** Preset ids this package owns: the bundled preset plus its copies. */
-export function isOursPresetId(id) {
-  return typeof id === 'string' && (id === PRESET_DIR_NAME || id.startsWith(PROFILE_ID_PREFIX));
-}
-
-/** Whether the preset id is a custom profile (a managed copy, not bundled). */
-export function isCustomProfileId(id) {
-  return isOursPresetId(id) && id !== PRESET_DIR_NAME;
-}
-
-function presetDirOf(preset) {
-  return dirname(preset.path);
-}
-
-/** Per-profile snapshot path inside a preset directory. */
-function profileConfigPath(presetDir) {
-  return join(presetDir, PROFILE_CONFIG_NAME);
-}
-
-/** Best-effort read of one preset directory's composition. */
-function readComposition(presetDir) {
-  try {
-    return readFileSync(join(presetDir, COMPOSITION_NAME), 'utf8');
-  } catch {
-    return '';
-  }
+function report(ctx, line) {
+  ctx.logger?.info?.(line);
 }
 
 /**
- * Whether a composition still carries the pre-0.1.3-alpha.2 persona row — a
- * `text:` block scalar with no `prefix:` sibling. DSH 0.1.5 reads only
- * `prefix`, so such a directory fails its WHOLE preset mount there (observed
- * 2026-09-10), which is what makes this migration worth surfacing in the card.
- * @param composition - agent.cordis.yml contents.
- * @returns whether the persona row needs the 0.1.5 migration.
+ * Mount the bundle's companion row.
+ * @param ctx - the row context (a profile-plane row, not a preset row).
+ * @param config - optional row config as documented above.
  */
-export function personaMigrationNeeded(composition) {
-  const lines = String(composition).split('\n');
-  const start = lines.findIndex((line) => /^- id: persona\s*$/.test(line));
-  if (start === -1) return false;
-  const end = lines.findIndex((line, index) => index > start && /^- /.test(line));
-  const block = lines.slice(start, end === -1 ? undefined : end);
-  const hasText = block.some((line) => /^\s+text:\s*\|-\s*$/.test(line));
-  const hasPrefix = block.some((line) => /^\s+prefix:/.test(line));
-  return hasText && !hasPrefix;
-}
-
-/**
- * Rewrite a composition's persona row into the dual-key form (`text:` anchored,
- * plus a `prefix:` alias) so one file mounts on both the 0.1.2 and 0.1.5 host
- * lines. Text-level on purpose: anything unexpected leaves the file untouched
- * and reports `changed: false` rather than guessing at a hand-edited file.
- * @param composition - agent.cordis.yml contents.
- * @returns the migrated composition and whether it changed.
- */
-export function migratePersonaComposition(composition) {
-  const source = String(composition);
-  if (!personaMigrationNeeded(source)) return { changed: false, text: source };
-  const lines = source.split('\n');
-  const start = lines.findIndex((line) => /^- id: persona\s*$/.test(line));
-  const end = lines.findIndex((line, index) => index > start && /^- /.test(line));
-  const blockEnd = end === -1 ? lines.length : end;
-  const textIndex = lines.findIndex((line, index) => index > start && index < blockEnd && /^\s+text:\s*\|-\s*$/.test(line));
-  if (textIndex === -1) return { changed: false, text: source };
-  const indent = lines[textIndex].match(/^\s+/)[0];
-  lines[textIndex] = `${indent}text: &omds-persona |-`;
-  lines.splice(blockEnd, 0, `${indent}prefix: *omds-persona`);
-  return { changed: true, text: lines.join('\n') };
-}
-
-function rpcError(code, message) {
-  return Object.assign(new Error(message), { code });
-}
-
-/** Content revision of a profile snapshot: hash of the file, or 'none'. */
-function revisionFor(path) {
-  if (!existsSync(path)) return 'none';
-  return createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 16);
-}
-
-/** Atomic replace of the profile snapshot (temp file + rename). */
-function writeProfileSnapshot(presetDir, config) {
-  const target = profileConfigPath(presetDir);
-  const tmp = join(presetDir, `.${PROFILE_CONFIG_NAME}.tmp-${process.pid}-${Date.now()}`);
-  try {
-    writeFileSync(tmp, `${JSON.stringify(config ?? {}, null, 2)}\n`);
-    renameSync(tmp, target);
-  } catch (error) {
-    try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
-    throw error;
-  }
-}
-
-/** Render a YAML `name:` line (double-quoted scalar; JSON escaping is valid YAML). */
-function yamlNameLine(value) {
-  return `name: ${JSON.stringify(String(value))}`;
-}
-
-/**
- * Rename a profile's display metadata in its preset.yml, preserving every
- * other line (description/order and any hand edits) verbatim. The id — the
- * directory name — never changes, which is the point of the rename.
- */
-function renamePresetMetadata(presetDir, displayName) {
-  const metaPath = join(presetDir, 'preset.yml');
-  const current = existsSync(metaPath) ? readFileSync(metaPath, 'utf8') : '';
-  const lines = current.split('\n');
-  const index = lines.findIndex((text) => /^name:/.test(text));
-  if (index === -1) {
-    const body = `${yamlNameLine(displayName)}\n${current}`;
-    writeFileSync(metaPath, body.replace(/\n{2,}/, '\n'));
-    return;
-  }
-  lines[index] = yamlNameLine(displayName);
-  writeFileSync(metaPath, lines.join('\n'));
-}
-
-/** Current display name from preset.yml (native metadata), or undefined. */
-function displayNameOf(preset) {
-  return typeof preset.name === 'string' && preset.name.trim() !== '' ? preset.name : undefined;
-}
-
-/**
- * The four profile RPC endpoints, as an injectable object over the native
- * authoring API. Exposed separately from the RPC wiring so the logic can be
- * driven directly by unit tests with a mock roster. Every endpoint throws a
- * coded error (`.code`) that the /omds handler maps to the RPC error
- * envelope; the browser adapter turns those into user-facing messages.
- */
-export function makeProfileEndpoints({ agentPresets, getSettings, log }) {
-  if (!agentPresets || typeof agentPresets.list !== 'function' || typeof agentPresets.resolve !== 'function') {
-    throw new Error('agent-presets service is unavailable; profile management cannot run');
-  }
-  const logger = {
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    ...(log ?? {}),
-  };
-
-  const allOurs = async () => (await agentPresets.list()).filter((preset) => isOursPresetId(preset.id));
-
-  async function assertNameFree(displayName, exceptId) {
-    const name = displayName.toLowerCase();
-    for (const preset of await allOurs()) {
-      if (preset.id === exceptId) continue;
-      const existing = displayNameOf(preset) ?? preset.id;
-      if (existing.toLowerCase() === name) {
-        throw rpcError('PROFILE_NAME_CONFLICT', `a profile named "${displayName}" already exists`);
-      }
-    }
-  }
-
-  return {
-    /** The full roster of profiles this package owns. */
-    async list() {
-      const defaultId = agentPresets.defaultId;
-      const profiles = [];
-      for (const preset of await allOurs()) {
-        const custom = isCustomProfileId(preset.id);
-        const dir = presetDirOf(preset);
-        const configPath = profileConfigPath(dir);
-        const entry = {
-          id: preset.id,
-          displayName: displayNameOf(preset) ?? preset.id,
-          kind: custom ? 'custom' : 'bundled',
-          isDefaultForNewSessions: preset.id === defaultId,
-          revision: custom ? revisionFor(configPath) : undefined,
-        };
-        if (custom) {
-          entry.config = existsSync(configPath)
-            ? JSON.parse(readFileSync(configPath, 'utf8'))
-            : {};
-          // Reported so the card can offer the one-click 0.1.5 persona
-          // migration; the bundled directory is the seeder's business.
-          entry.needsMigration = personaMigrationNeeded(readComposition(dir));
-        }
-        profiles.push(entry);
-      }
-      return {
-        profiles,
-        defaultProfileId: typeof defaultId === 'string' ? defaultId : PRESET_DIR_NAME,
-      };
-    },
-
-    /**
-     * Create a profile: native whole-directory copy (atomic; a failed copy
-     * removes its destination and the copy refuses occupied ids), then the
-     * config snapshot. A validation or write failure removes the copy again —
-     * the roster must never see a half-authored profile.
-     */
-    async create({ displayName, config }) {
-      const name = normalizeDisplayName(displayName);
-      await assertNameFree(name);
-      const id = profileIdForDisplayName(name);
-      let dir;
+export function apply(ctx, config) {
+  const verdict = assertHostCompatible({ ctx });
+  wireConfigSettings(ctx, { validate: validateConfigDocument });
+  ctx.inject(['settings'], child => child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)));
+  ctx.inject(['loader', 'connection', 'webServer', 'agentPresets', 'configEditor', 'settings'], async child => {
+    const endpoints = makeProfileEndpoints({ agentPresets: child.agentPresets, getSettings: () => child.settings, getEditor: () => child.configEditor });
+    const methods = { 'profile-list': 'list', 'profile-create': 'create', 'profile-save': 'save', 'profile-set-default': 'setDefault', 'profile-migrate': 'migrate' };
+    // Reuse the host RPC implementation, but explicitly own the route on the
+    // child that injected webServer (not the connection provider's fiber).
+    await registerProfileTransport(child, async (endpoint, payload, signal, peer) => {
       try {
-        await agentPresets.copy(PRESET_DIR_NAME, id, name);
-        dir = presetDirOf(await agentPresets.resolve(id));
-      } catch (error) {
-        if (error?.code !== undefined) throw error;
-        throw rpcError('PROFILE_CREATE_FAILED', `cannot create profile preset: ${error?.message ?? String(error)}`);
-      }
-      try {
-        try {
-          validateConfigDocument(config);
-        } catch (error) {
-          throw rpcError('PROFILE_INVALID_CONFIG', `profile configuration rejected: ${error?.message ?? String(error)}`);
-        }
-        writeProfileSnapshot(dir, config ?? {});
-      } catch (error) {
-        try { await agentPresets.remove(id); } catch { /* rollback is best effort */ }
-        if (error?.code !== undefined) throw error;
-        throw rpcError('PROFILE_WRITE_FAILED', `profile configuration could not be written: ${error?.message ?? String(error)}`);
-      }
-      logger.info(`omds-preset-seeder: created native profile preset ${id} ("${name}")`);
-      return {
-        id,
-        displayName: name,
-        revision: revisionFor(profileConfigPath(dir)),
-      };
-    },
-
-    /**
-     * Persist a profile's configuration snapshot (and, when given, rename its
-     * display metadata — the id never changes). expectedRevision must match
-     * the current snapshot, so two concurrent writers cannot silently
-     * overwrite each other ("none" is the revision of an untouched copy).
-     */
-    async save({ id, config, expectedRevision, displayName }) {
-      if (typeof expectedRevision !== 'string') {
-        throw rpcError('PROFILE_CONFLICT', 'expectedRevision is required to save a profile');
-      }
-      if (!isCustomProfileId(id)) {
-        throw rpcError('PROFILE_UNSUPPORTED', 'only custom profiles persist through /omds; the bundled profile saves through the settings namespace');
-      }
-      let preset;
-      try {
-        preset = await agentPresets.resolve(id);
-      } catch {
-        throw rpcError('PROFILE_NOT_FOUND', `profile "${id}" does not exist`);
-      }
-      if (preset.trust !== 'user') {
-        throw rpcError('PROFILE_UNSUPPORTED', `profile "${id}" is not locally authored`);
-      }
-      const dir = presetDirOf(preset);
-      const configPath = profileConfigPath(dir);
-      const current = revisionFor(configPath);
-      if (current !== expectedRevision) {
-        throw rpcError('PROFILE_CONFLICT', `profile "${id}" changed since it was loaded (expected "${expectedRevision}", found "${current}")`);
-      }
-      try {
-        validateConfigDocument(config);
-      } catch (error) {
-        throw rpcError('PROFILE_INVALID_CONFIG', `profile configuration rejected: ${error?.message ?? String(error)}`);
-      }
-      let finalName = displayNameOf(preset);
-      if (displayName !== undefined) {
-        const name = normalizeDisplayName(displayName);
-        if (name !== finalName) {
-          await assertNameFree(name, id);
-          renamePresetMetadata(dir, name);
-          finalName = name;
-        }
-      }
-      try {
-        writeProfileSnapshot(dir, config ?? {});
-      } catch (error) {
-        throw rpcError('PROFILE_WRITE_FAILED', `profile configuration could not be written: ${error?.message ?? String(error)}`);
-      }
-      logger.info(`omds-preset-seeder: saved profile ${id} (revision ${revisionFor(configPath)})`);
-      return {
-        id,
-        displayName: finalName ?? id,
-        revision: revisionFor(configPath),
-      };
-    },
-
-    /**
-     * Mark a profile as the default for NEW sessions. Writes DSH's own
-     * agent-presets default document, so the native preset picker and this
-     * card always agree; running sessions are untouched by design.
-     */
-    async setDefault({ profileId }) {
-      if (!isOursPresetId(profileId)) {
-        throw rpcError('PROFILE_UNSUPPORTED', `"${profileId}" is not an oh-my-dsh-slim profile`);
-      }
-      try {
-        await agentPresets.resolve(profileId);
-      } catch {
-        throw rpcError('PROFILE_NOT_FOUND', `profile "${profileId}" does not exist`);
-      }
-      const settings = typeof getSettings === 'function' ? getSettings() : undefined;
-      if (!settings || typeof settings.mutate !== 'function') {
-        throw rpcError('PROFILE_SETTINGS_UNAVAILABLE', 'the settings service is unavailable; cannot change the new-session default');
-      }
-      await settings.mutate(NATIVE_DEFAULT_NS, [{ op: 'set', path: ['default'], value: profileId }]);
-      logger.info(`omds-preset-seeder: new-session default preset is now ${profileId}`);
-      return { profileId, isDefaultForNewSessions: true };
-    },
-
-    /**
-     * Rewrite one custom profile's persona row into the dual-key form so it
-     * mounts on both supported host lines (DSH 0.1.5 reads only `prefix`).
-     * Idempotent, backs the composition up first, and refuses anything it does
-     * not recognize rather than guessing at a hand-edited file.
-     */
-    async migrate({ profileId }) {
-      if (!isCustomProfileId(profileId)) {
-        throw rpcError('PROFILE_UNSUPPORTED', 'only custom profiles migrate through /omds; the bundled profile is refreshed by the package seeder');
-      }
-      let preset;
-      try {
-        preset = await agentPresets.resolve(profileId);
-      } catch {
-        throw rpcError('PROFILE_NOT_FOUND', `profile "${profileId}" does not exist`);
-      }
-      if (preset.trust !== 'user') {
-        throw rpcError('PROFILE_UNSUPPORTED', `profile "${profileId}" is not locally authored`);
-      }
-      const dir = presetDirOf(preset);
-      const file = join(dir, COMPOSITION_NAME);
-      let current;
-      try {
-        current = readFileSync(file, 'utf8');
-      } catch (error) {
-        throw rpcError('PROFILE_MIGRATE_FAILED', `cannot read ${COMPOSITION_NAME}: ${error?.message ?? String(error)}`);
-      }
-      const migrated = migratePersonaComposition(current);
-      if (!migrated.changed) return { profileId, changed: false };
-      const backup = `${COMPOSITION_NAME}${PERSONA_BACKUP_SUFFIX}`;
-      try {
-        if (!existsSync(join(dir, backup))) copyFileSync(file, join(dir, backup));
-        const staged = `${file}.tmp-${process.pid}`;
-        writeFileSync(staged, migrated.text);
-        renameSync(staged, file);
-      } catch (error) {
-        throw rpcError('PROFILE_MIGRATE_FAILED', `cannot rewrite ${COMPOSITION_NAME}: ${error?.message ?? String(error)}`);
-      }
-      logger.info(`omds-preset-seeder: migrated profile ${profileId} to the dual-key persona row (backup: ${backup})`);
-      return { profileId, changed: true, backup };
-    },
-  };
-}
-
-function resolveHome() {
-  const env = process.env.DSH_HOME;
-  return env !== undefined && env.trim() !== '' ? env : join(homedir(), '.dsh');
-}
-
-function stamp() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-}
-
-function seedFresh(target, log) {
-  cpSync(bundledDir, target, { recursive: true });
-  writeFileSync(join(target, MARKER_FILE), JSON.stringify({ seededVersion: bundledVersion }, null, 2));
-  log.info(`omds-preset-seeder: preset seeded at ${target} (v${bundledVersion})`);
-}
-
-function legacyJsonPath() {
-  return join(resolveHome(), `${PRESET_DIR_NAME}.json`);
-}
-
-// One-time migration: a legacy oh-my-dsh-slim.json becomes the namespace's
-// user section and the file is archived. Every failure mode keeps the file in
-// place and explains why — an import must never lose user intent.
-function importLegacyJson(sctx, scope, schema, log) {
-  const path = legacyJsonPath();
-  if (!existsSync(path)) return;
-  let doc;
-  try {
-    doc = JSON.parse(readFileSync(path, 'utf8'));
-  } catch (error) {
-    log.warn(`omds-preset-seeder: legacy ${path} is not valid JSON; leaving it untouched (${error.message})`);
-    return;
-  }
-  const descriptor = sctx.settings.describe().find((entry) => entry.ns === SETTINGS_NS);
-  if (descriptor?.user !== undefined && Object.keys(descriptor.user).length > 0) {
-    log.warn(`omds-preset-seeder: settings.yaml already carries a "${SETTINGS_NS}" section; legacy ${path} is ignored — archive or delete the file to silence this warning`);
-    return;
-  }
-  try {
-    schema(doc);
-  } catch (error) {
-    log.warn(`omds-preset-seeder: legacy ${path} failed schema validation; leaving it untouched (${error.message})`);
-    return;
-  }
-  scope.replace(doc);
-  const archive = `${path}.imported-${stamp()}`;
-  renameSync(path, archive);
-  log.info(`omds-preset-seeder: imported ${path} into settings "${SETTINGS_NS}" and archived it at ${archive}`);
-}
-
-// Register the settings namespace so the preset's config-loader (and, from
-// v2, the GUI card) has a sanctioned write channel. The only peer,
-// @deepseek-ai/schemastery, is provided by the host; when it cannot be
-// resolved the namespace is skipped and the legacy JSON channel stays
-// authoritative. Registration rides ctx.inject, so a host without a settings
-// service simply never runs it. Nothing here may break the DSH boot.
-async function wireSettings(ctx, log) {
-  let z;
-  try {
-    z = (await import('@deepseek-ai/schemastery')).default;
-  } catch (error) {
-    log.info(`omds-preset-seeder: @deepseek-ai/schemastery unavailable (${error?.message ?? error}); settings namespace skipped, legacy JSON channel stays active`);
-    return;
-  }
-  const schema = buildSettingsSchema(z);
-  ctx.inject(['settings'], (sctx) => {
-    try {
-      const scope = sctx.settings.register(SETTINGS_NS, schema, { base: bundledDefaults });
-      importLegacyJson(sctx, scope, schema, log);
-      scope.watch(() => log.info(`omds-preset-seeder: settings "${SETTINGS_NS}" updated`));
-      log.info(`omds-preset-seeder: settings namespace "${SETTINGS_NS}" registered`);
-    } catch (error) {
-      log.error(`omds-preset-seeder: settings namespace registration failed; legacy JSON channel stays active: ${error?.stack ?? String(error)}`);
-    }
-  });
-}
-
-// The /omds RPC owns profile authoring because the browser must never write a
-// native preset directory itself. A serialized queue closes the check/copy
-// race for two simultaneous first-save requests with the same display name.
-//
-// 0.1.5 note: `connection.rpc.handle()` is unusable here. It registers its
-// route through the reading context's `webServer` (`owner.webServer.register`),
-// and cordis resolves that owner to this plugin's fiber — which does not
-// declare `webServer` — so the call throws
-// `cannot get property "webServer" without inject` and the channel silently
-// never appears (the card then reports 配置列表读取失败 with no server log).
-// Register the prefix route on `webServer` directly and speak the connection
-// envelope ourselves; the envelope is byte-identical across 0.1.2 and 0.1.5:
-//   client → POST {path}/{endpoint}  {type:'client-request', rpcId, method, payload}
-//   host   → {type:'server-response', rpcId, result:{ok:true,value}
-//                                                   |{ok:false,error:{code,message,details}}}
-// `error.details` must be a record — both target host lines reject a failure
-// envelope without it, which would turn every coded error (save conflicts
-// included) into an opaque parse failure on the card.
-// A headless host has no `webServer`, so this inject stays inactive there and
-// the seeder/settings wiring is unaffected.
-const OMDS_RPC_PATH = '/omds';
-
-function wireOmdsRpc(ctx, log) {
-  ctx.inject(['webServer', 'connection', 'agentPresets'], (cctx) => {
-    let createQueue = Promise.resolve();
-    let settings;
-    ctx.inject(['settings'], (sctx) => { settings = sctx.settings; });
-    const endpoints = makeProfileEndpoints({
-      agentPresets: cctx.agentPresets,
-      getSettings: () => settings,
-      log,
+        if (signal?.aborted) throw Object.assign(new Error('operation aborted'), { code: 'ABORT_ERR' });
+        const method = methods[endpoint];
+        if (!method) throw Object.assign(new Error('unknown /omds endpoint: ' + endpoint), { code: 'UNKNOWN_ENDPOINT' });
+        return { ok: true, value: await endpoints[method](payload ?? {}) };
+      } catch (error) { return { ok: false, error: { code: error?.code ?? 'PROFILE_FAILED', message: error?.message ?? String(error), details: {} } }; }
     });
-    const runCreate = (task) => {
-      const turn = createQueue.then(task);
-      createQueue = turn.catch(() => undefined);
-      return turn;
-    };
-    const dispatch = async (endpoint, payload) => {
-      if (endpoint === 'profile-list') {
-        return { ok: true, value: await endpoints.list() };
-      }
-      if (endpoint === 'profile-create') {
-        return { ok: true, value: await runCreate(() => endpoints.create(payload)) };
-      }
-      if (endpoint === 'profile-save') {
-        return { ok: true, value: await endpoints.save(payload) };
-      }
-      if (endpoint === 'profile-set-default') {
-        return { ok: true, value: await endpoints.setDefault(payload) };
-      }
-      if (endpoint === 'profile-migrate') {
-        return { ok: true, value: await endpoints.migrate(payload) };
-      }
-      throw rpcError('NOT_FOUND', `unknown endpoint ${endpoint}`);
-    };
-    const handler = async (req, res) => {
-      // Same fence the connection bridge applies to /api: reject an untrusted
-      // host/origin, then an unauthenticated browser.
-      const rejection = cctx.connection?.requestRejection?.(req);
-      if (rejection !== void 0) {
-        res.writeHead(rejection);
-        res.end(rejection === 401 ? 'unauthorized' : 'forbidden');
-        return;
-      }
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      let body;
-      try {
-        body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
-      } catch {
-        body = undefined;
-      }
-      const endpoint = typeof body?.method === 'string'
-        ? body.method
-        : String(req.url ?? '').split('?')[0].slice(OMDS_RPC_PATH.length + 1);
-      let result;
-      try {
-        result = await dispatch(endpoint, body?.payload ?? {});
-      } catch (error) {
-        result = { ok: false, error: { code: error?.code ?? 'INTERNAL', message: error?.message ?? String(error), details: {} } };
-      }
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ type: 'server-response', rpcId: body?.rpcId, result }));
-    };
-    try {
-      cctx.webServer.register({ kind: 'prefix', path: OMDS_RPC_PATH, handler });
-      log.info('omds-preset-seeder: /omds RPC registered');
-    } catch (error) {
-      log.warn(`omds-preset-seeder: /omds RPC registration failed (${error?.message ?? error}); card falls back to bundled-only`);
-    }
   });
-}
-
-// Host compatibility notice: when the running DSH is outside this release's
-// supported range, the seeder must stay fully inert (no seeding, no /omds) but
-// the user's existing preset and its settings channel keep working. The only
-// user-visible surface we still own is a dedicated settings page that states
-// the situation and the fix — never the boot log alone.
-//
-// Two directions, deliberately different texts: too old (the native authoring
-// API does not exist there) and too new (0.1.7 dropped directory presets, so
-// seeding would be a silent no-op — the write lands in a directory nobody
-// reads).
-async function wireCompatNotice(ctx, log, hostVersion, reason) {
-  let z;
+  if (!Config) ctx.logger?.warn?.('oh-my-dsh-slim: host schemastery could not be resolved; native configuration form unavailable, legacy JSON remains active');
+  const presetId = typeof config?.presetId === 'string' && config.presetId.length > 0 ? config.presetId : PRESET_ID;
+  const verbose = config?.verbose === true;
+  report(ctx, `oh-my-dsh-slim: agent preset "${presetId}" is declared by this bundle (declarative preset; no directory is seeded)`);
+  report(ctx, `oh-my-dsh-slim: host DSH ${verdict.host ?? 'unknown'} - ${verdict.status}`);
+  const roles = roleIds();
+  report(ctx, `oh-my-dsh-slim: ${String(roles.length)} role tools: ${advertisedRoles()}`);
   try {
-    z = (await import('@deepseek-ai/schemastery')).default;
+    const config = loadConfig();
+    report(ctx, `oh-my-dsh-slim: ${describeConfig(config)}`);
+    if (verbose) {
+      const file = process.env.OH_MY_DSH_SLIM_CONFIG ?? join(dshHome(), CONFIG_FILE_NAME);
+      report(ctx, `oh-my-dsh-slim: configuration file would be ${file}`);
+      for (const roleId of roles) {
+        const role = config.roles?.[roleId];
+        if (role === undefined) continue;
+        const route = `${role.provider ?? '?'}/${role.model ?? '?'}`;
+        report(ctx, `oh-my-dsh-slim:   ${roleId}: ${role.enabled === false ? 'disabled' : 'enabled'} ${route} effort=${role.effort ?? '(host default)'}`);
+      }
+    }
   } catch (error) {
-    log.info(`omds-preset-seeder: @deepseek-ai/schemastery unavailable (${error?.message ?? error}); compatibility notice page skipped`);
-    return;
-  }
-  ctx.inject(['settings'], (sctx) => {
-    try {
-      const text = reason === 'too-new'
-        ? `oh-my-dsh-slim v${bundledVersion} supports DSH < ${MAX_HOST_VERSION_EXCLUSIVE} ` +
-          `(this host: DSH ${hostVersion}). DSH 0.1.7 replaced directory agent presets with ` +
-          'declarative ones declared by plugin bundles, so this release would install and then ' +
-          'never appear — nothing was seeded and your existing preset was left untouched. ' +
-          'Fix: stay on DSH <= 0.1.5-rc.2 (the latest verified host) with oh-my-dsh-slim 0.5.x; ' +
-          'a release supporting the declarative model is in development.'
-        : `oh-my-dsh-slim v${bundledVersion} requires DSH >= ${MIN_HOST_VERSION} ` +
-          `(this host: DSH ${hostVersion}). The plugin did NOT touch your preset ` +
-          'directory — your existing oh-my-dsh-slim preset stays usable as-is. ' +
-          'Fix: upgrade DSH to 0.1.2-rc.1 or newer, or install oh-my-dsh-slim@0.4.0.';
-      const banner = z.object({}).description(text);
-      sctx.settings.register('oh-my-dsh-slim-compat', banner, { base: {} });
-      log.warn('omds-preset-seeder: compatibility notice page registered (Settings → Plugins → oh-my-dsh-slim-compat)');
-    } catch (error) {
-      log.warn(`omds-preset-seeder: compatibility notice page registration failed: ${error?.message ?? String(error)}`);
-    }
-  });
-}
-
-export function apply(ctx, options = {}) {
-  const log = {
-    info: (message) => ctx.logger?.info?.(message),
-    warn: (message) => ctx.logger?.warn?.(message),
-    error: (message) => ctx.logger?.error?.(message),
-  };
-  // Host compatibility gate (0.1.2 changed the APIs this release needs; 0.1.7
-  // replaced directory presets, so this release must not pretend to work
-  // there). Undetectable version fails open — an unusual layout is not proof
-  // of an unsupported host, and guessing would break valid setups. In degraded
-  // mode: seeding and the /omds RPC stay off, the existing preset directory is
-  // never touched, and the settings namespace still registers so a bundled
-  // 0.4.0 preset keeps its configuration channel.
-  const hostVersion = options.hostVersion ?? detectHostDshVersion();
-  const hostTooOld = hostVersion !== undefined && compareSemver(hostVersion, MIN_HOST_VERSION) < 0;
-  // 0.1.7 dropped directory presets: seeding would write a directory nobody
-  // reads (a silent no-op), so refuse with an explanation instead.
-  const hostTooNew = hostVersion !== undefined && compareSemver(hostVersion, MAX_HOST_VERSION_EXCLUSIVE) >= 0;
-  if (hostTooOld) {
-    log.warn(
-      `omds-preset-seeder: oh-my-dsh-slim v${bundledVersion} requires DSH >= ${MIN_HOST_VERSION} ` +
-      `(this host: DSH ${hostVersion}). Your preset directory was left untouched and stays ` +
-      'usable as-is. Fix: upgrade DSH to 0.1.2-rc.1 or newer, or install oh-my-dsh-slim@0.4.0.',
-    );
-  } else if (hostTooNew) {
-    log.warn(
-      `omds-preset-seeder: oh-my-dsh-slim v${bundledVersion} supports DSH < ${MAX_HOST_VERSION_EXCLUSIVE} ` +
-      `(this host: DSH ${hostVersion}). DSH 0.1.7 replaced directory agent presets with declarative ` +
-      'ones, so this release would install and then never appear; nothing was seeded. ' +
-      'Fix: stay on DSH <= 0.1.5-rc.2 with oh-my-dsh-slim 0.5.x (declarative support is in development).',
-    );
-  }
-  try {
-    if (hostTooOld || hostTooNew) return;
-    const target = join(resolveHome(), '.agent-presets', PRESET_DIR_NAME);
-
-    if (!existsSync(target)) {
-      seedFresh(target, log);
-      return;
-    }
-    if (existsSync(join(target, '.git'))) {
-      log.info('omds-preset-seeder: preset directory is git-managed; leaving it untouched');
-      return;
-    }
-    let marker;
-    try {
-      marker = JSON.parse(readFileSync(join(target, MARKER_FILE), 'utf8'));
-    } catch {
-      marker = undefined;
-    }
-    if (marker === undefined || typeof marker.seededVersion !== 'string') {
-      log.warn(`omds-preset-seeder: "${target}" exists without a seed marker (installed manually?); leaving it untouched`);
-      return;
-    }
-    // Prerelease-aware (host-version.js): a local transition package left the
-    // marker at `<v>-0`, and a major.minor.patch-only comparison called that
-    // equal to `<v>`, so the released content never re-seeded (found 2026-09-18
-    // on 0.5.2-0 → 0.5.2; code happened to be identical, but an rc→final step
-    // carrying changes would have left the directory on stale plugin code).
-    if (compareSemver(bundledVersion, marker.seededVersion) <= 0) {
-      log.info(`omds-preset-seeder: preset v${marker.seededVersion} is up to date (bundled v${bundledVersion})`);
-      return;
-    }
-    // Upgrade: bundled is newer. The old directory is backed up wholesale, so
-    // hand edits inside it survive in the backup; the sanctioned customization
-    // channel (the user JSON outside this directory) is never touched.
-    const backup = join(resolveHome(), '.agent-presets', `${PRESET_DIR_NAME}.bak-${stamp()}`);
-    cpSync(target, backup, { recursive: true });
-    rmSync(target, { recursive: true, force: true });
-    seedFresh(target, log);
-    log.warn(`omds-preset-seeder: preset upgraded v${marker.seededVersion} → v${bundledVersion}; previous copy backed up at ${backup}`);
-  } catch (error) {
-    // The seeder must never break the DSH boot. Worst case: the preset is not
-    // seeded this run and the error explains why.
-    log.error?.(`omds-preset-seeder failed: ${error?.stack ?? String(error)}`);
-  } finally {
-    // finally, not fall-through: every seeding branch above exits apply with
-    // an early return, and the settings namespace must register on ALL of
-    // them (found by the seeder unit test's fresh-install scenario) — also in
-    // degraded mode, where the bundled 0.4.0 preset still reads this channel.
-    wireSettings(ctx, log).catch((error) => {
-      log.warn(`omds-preset-seeder: settings namespace unavailable (${error?.message ?? error}); legacy JSON channel stays active`);
-    });
-    if (hostTooOld) wireCompatNotice(ctx, log, hostVersion, 'too-old');
-    else if (hostTooNew) wireCompatNotice(ctx, log, hostVersion, 'too-new');
-    else wireOmdsRpc(ctx, log);
+    ctx.logger?.warn?.(`oh-my-dsh-slim: cannot read the configuration (${error instanceof Error ? error.message : String(error)}); the preset falls back to its shipped defaults`);
   }
 }

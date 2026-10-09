@@ -6,13 +6,14 @@
 // starts a new turn, and the settlement notice only delivers once. OMO's
 // equivalent is its `task_result` tool.
 //
-// This file MUST stay a standalone singleton row in agent.cordis.yml. It must
-// never be folded into role-subagent.js: that file is applied once per role
+// This file MUST stay a standalone singleton row in the preset's row list. It
+// must never be folded into roles.js: that file is applied once per role
 // row (6x), and registering the same globally-named tool twice throws
 // `tool "..." is already registered` (dsh-tools NamedEntries), which fails the
 // whole preset mount.
 //
-// Data path (verified by scripts/probe-session-query.js, 2026-08-21):
+// Data path (verified by the now-retired scripts/probe-session-query.js,
+// 2026-08-21):
 // ctx.get('sessionQuery') is mounted by dsh-base (session-query-sqlite,
 // openAt: never) — exact reads work everywhere, only full-text search is
 // disabled. readSurface(id) resolves live-preferred and falls back to session
@@ -20,53 +21,30 @@
 // Authorization compares the header's parentSession against the calling
 // agent's own session id, so a session can only read lanes it spawned itself.
 //
-// Dependency resolution mirrors ../role-subagent.js: a preset directory cannot
-// bare-import @deepseek-ai/*, so resolve them from the global DSH install.
-// Top-level require() is safe here for dsh-tools/dsh-session (both are fully
-// loaded before any preset row applies — role-subagent.js ships the same
-// pattern); do NOT copy this pattern for packages loaded late in boot.
+// Dependency resolution goes through ./bridge.js: a preset row cannot
+// bare-import @deepseek-ai/* without resolving a stale copy out of the user's
+// global node_modules, so bridge.js imports the host's own module instances
+// under the host's base URL. This is safe at row-apply time for
+// dsh-tools/dsh-session (both are fully loaded before any preset row applies);
+// do NOT copy the pattern for packages loaded late in boot.
 
-import { createRequire } from 'node:module';
-import { execSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { assertHostCompatible } from './host-version.js';
-
-// Host compatibility gate: one throw here aborts the whole preset mount (fail-fast).
-assertHostCompatible();
-
-function resolveDshPackage() {
-  const roots = [];
-  if (process.env.DSH_HOME) {
-    roots.push(join(process.env.DSH_HOME, 'profiles', 'node_modules'));
-    roots.push(join(process.env.DSH_HOME, 'profiles', 'web', 'node_modules'));
-  }
-  const probeOptions = { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] };
-  for (const command of ['npm root -g', 'zsh -lic "npm root -g"']) {
-    // zsh -lic sources the user's login+interactive shell config, which can hang
-    // (reported on Linux); every probe is bounded and silent on stderr.
-    try {
-      roots.push(execSync(command, probeOptions).trim());
-      break; // first reachable npm root wins; the zsh fallback only runs when plain sh lacks npm
-    } catch {}
-  }
-  try {
-    const dshBin = realpathSync(execSync('command -v dsh', probeOptions).trim());
-    roots.push(dirname(dirname(dirname(dirname(dshBin)))));
-  } catch {}
-  roots.push(join(dirname(process.execPath), '..', 'lib', 'node_modules'));
-  roots.push('/opt/homebrew/lib/node_modules', '/usr/local/lib/node_modules');
-  const root = roots.find((candidate) => existsSync(join(candidate, '@deepseek-ai/dsh/package.json')));
-  if (!root) throw new Error('subagent-result: cannot locate the DSH node_modules; set DSH_HOME or run inside DSH');
-  return join(root, '@deepseek-ai/dsh/package.json');
-}
-
-const require = createRequire(resolveDshPackage());
-const { defineTool } = require('@deepseek-ai/dsh-tools');
-const { SessionId } = require('@deepseek-ai/dsh-session');
+import { hostImport } from './bridge.js';
 
 const name = 'subagent-result';
-const inject = ['tools'];
+// `loader` is the host's module loader: the only component that can resolve
+// @deepseek-ai/dsh-* for a plugin that lives outside the DSH installation.
+const inject = ['tools', 'loader'];
+
+export function latestOwnAssistant(snapshot) {
+  // Upstream scans the complete surface, including inherited fork history.
+  for (let i = snapshot.events.length - 1; i >= 0; i--) {
+    const event = snapshot.events[i];
+    if (event.type !== 'assistant/message') continue;
+    const text = assistantText(event);
+    if (text !== '') return { kind: 'result', seq: event.seq, text };
+  }
+  return undefined;
+}
 
 function assistantText(event) {
   const content = event?.data?.message?.content;
@@ -74,9 +52,14 @@ function assistantText(event) {
   return content.filter((block) => block.type === 'text').map((block) => block.text).join('');
 }
 
-function apply(ctx) {
-  let disposed = false;
-  const disposeTool = ctx.tools.register(defineTool({
+async function apply(ctx) {
+  const [tools, session] = await Promise.all([
+    hostImport(ctx, '@deepseek-ai/dsh-tools'),
+    hostImport(ctx, '@deepseek-ai/dsh-session'),
+  ]);
+  const { defineTool } = tools;
+  const { SessionId } = session;
+  const dispose = ctx.effect(() => ctx.tools.register(defineTool({
     name: 'subagent_result',
     description: [
       'Read-only retrieval of a background subagent\'s final message.',
@@ -143,25 +126,18 @@ function apply(ctx) {
       if (snapshot.session.parentSession !== parent.id) {
         throw new Error(`subagent_result: session "${args.subagent_id}" is not a direct child of this session`);
       }
-      for (let i = snapshot.events.length - 1; i >= 0; i--) {
-        const event = snapshot.events[i];
-        if (event.type !== 'assistant/message') continue;
-        const text = assistantText(event);
-        if (text === '') continue;
-        return { kind: 'result', subagentId: args.subagent_id, seq: event.seq, text };
-      }
+      const result = latestOwnAssistant(snapshot);
+      if (result) return { ...result, subagentId: args.subagent_id };
       return {
         kind: 'no-assistant-message',
         subagentId: args.subagent_id,
         capturedThroughSeq: snapshot.capturedThroughSeq ?? 0,
       };
     },
-  }));
-  return () => {
-    if (disposed) return;
-    disposed = true;
-    disposeTool();
-  };
+  })), 'subagent-result: tool');
+  // The tool stays registered for the fiber's lifetime; the cordis effect owns
+  // disposal. `dispose` is intentionally unused afterwards.
+  void dispose;
 }
 
 export { name, inject, apply };

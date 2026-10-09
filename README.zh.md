@@ -1,245 +1,203 @@
 # oh-my-dsh-slim
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中复刻
-[oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的 subagent 角色委派体系：
-**orchestrator + 5 个专职角色**，每个角色有独立 persona、模型、工具权限（toolFilter）、思考强度
-（reasoningEffort）与 MCP 访问。交付物是一个可共享的 **DSH agent 预设**（含随预设分发的配置插件），
-不是独立应用。
+**oh-my-dsh-slim · 0.6.1-native.3 · DSH 0.2 兼容版本线**
 
-> Persona 文本适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名——详见
-> [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
+在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
+[oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
+**orchestrator + 5 个启用的专职角色**，交付为从插件组合包挂载的**声明式原生 agent 预设**，
+不是独立应用，也不需要手工复制预设目录。
 
-> **⚠️ DSH 版本支持（0.5.2）**：**DSH 0.1.2-rc.1 ～ 0.1.5-rc.2**，两条宿主线均已端到端实测
-> （0.1.2 线；0.1.5 线的 rc.1 与 rc.2）。DSH 0.1.1 及以下请继续使用 oh-my-dsh-slim **0.4.0**：插件会
-> 检测出版本不符，**完全不动你现有的预设目录**（照常可用），并在
-> **设置 → 插件 → oh-my-dsh-slim-compat** 显示提示页。另请注意：**升级后需要重启 DSH**
-> （插件代码每进程只挂载一次，仅开新会话不会加载新代码）。
->
-> **⛔ DSH 0.1.6 及更新版本（含整条 0.1.7 线）本版本不支持。** DSH 0.1.7 把目录式 agent preset
-> 换成了由插件组合包声明的**声明式** preset，本预设装完将不会出现。插件会在该宿主上直接拒绝：
-> 不播种任何内容、不动你已有的文件，并在 **设置 → 插件 → oh-my-dsh-slim-compat** 页说明原因。
-> 目前请留在 DSH ≤ 0.1.5-rc.2；适配声明式 preset 的版本正在开发中。
->
-> **从 0.5.0 升级且宿主为 DSH 0.1.5**：内置预设会自动重播种修复；但**自定义配置**保留自己的目录
-> 内容——若 DSH 0.1.5 无法挂载某份配置，设置卡片会标记它并支持**一键迁移**（就地改写
-> `agent.cordis.yml`，并在旁边保留备份）。你也可以选择重建该配置。
+> **宿主范围：`>=0.2.0-rc.2 <0.3.0-0`；实测宿主：DSH 0.2.0-rc.2。**
+> 范围允许 rc.3、0.2.0 正式版及后续 0.2 稳定版本安装，不代表它们已通过测试。
+> 升级策略：所需 API 不变时维持 0.2 版本线兼容，验证新宿主后才宣称实测支持；0.3 版本线另行审查。
+> **DSH ≤0.1.5 请继续使用 `oh-my-dsh-slim@0.5.3`。** 中间版本需要升级 DSH。
+> native.3 已通过 101 项自动测试和六项隔离已安装宿主基础组合 smoke，用户接受中文待办网页的桌面委派复测为成功；
+> 尚未完成完整工具轨迹审计、浏览器或在线 MCP 验收。安装或更新后必须**完整重启 DSH**。
 
-## 它解决什么问题
+Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
+见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
 
-DSH 的默认编排是“一个模型包打天下”。本预设把工作拆成专职车道，orchestrator 只负责规划、派发与整合：
+## 角色与委派
 
-- **oracle**（战略顾问）：架构决策、复杂排障、代码评审——只读
-- **designer**（前端设计）：UI/UX 与视觉打磨——可写
-- **fixer**（快速实现）：规格明确的机械实现——可写
-- **explorer**（代码检索）：快速结构勘察——只读
-- **librarian**（外部调研）：官方文档/GitHub 检索（context7 + gh_grep MCP）——只读
-
-派发默认走**后台**（continuable）：orchestrator 派完即结束回合，子代理完成时由运行时通知唤醒整合。
-orchestrator 遵循严格的委派纪律——派发完独立车道后以简短状态说明结束回合（不轮询、不在同一回合
-重做运行中车道的 scope 内工作），把车道的中间回报视为「尚未结算」，只在 finish 通知后收口；
-`subagent_result` 工具可只读取回已结束子代理的最终消息（不唤醒、零额外模型轮次）。
-
-## 角色矩阵
-
-| 角色 | 工具名 | 默认模型 | 默认 effort | 权限 |
+| 角色 | 工具 | 默认模型 | effort | 权限 |
 |---|---|---|---|---|
 | oracle | subagent_oracle | deepseek-v4-pro | max | 只读 |
 | designer | subagent_designer | deepseek-v4-flash | high | 可写 |
 | fixer | subagent_fixer | deepseek-v4-flash | high | 可写 |
 | explorer | subagent_explorer | deepseek-v4-flash | low | 只读 |
-| librarian | subagent_librarian | deepseek-v4-flash | high | 只读 + MCP |
+| librarian | subagent_librarian | deepseek-v4-flash | high | 只读 + 角色作用域 MCP |
 
-- 所有角色继承全局工具，只读角色 deny `edit/write`，全部角色 deny 控制类工具（OMO 风格 deny-only）
-- 角色禁止再委派（maxDepth: 1）；librarian 在自己的 child scope 中独享 context7/gh_grep
-- **observer（视觉分析）本版本预留但默认关闭**：DSH 的发送门控按主模型视觉能力拦截图片附件，
-  且委派提示词是纯文本，粘贴图无法交接给子代理。等上游支持"消息附件转发进子代理"后开放。
+- oracle 负责架构、复杂排障与评审；designer 负责 UI/UX；fixer 负责有边界的实现；explorer 负责
+  代码勘察；librarian 负责外部调研。
+- 随包模型走 `deepseek-official`。可改成宿主已导入的其他 provider/model；真实请求需对应凭据。
+- 角色继承全局工具，只读角色 deny `edit`/`write`；全部角色 deny 控制类工具（`skill`、`job_kill`、
+  `job_list`、`job_output`、`todo_write`、`ask_user_question`），禁止继续委派（`maxDepth: 1`）。
+- **observer 预留但强制关闭**：委派提示是纯文本，宿主按主模型视觉能力门控粘贴图片。
+  附件转发尚未支持时，请直接使用支持视觉的主模型。
 
-## 安装
+委派默认后台且可续聊。独立任务一起派发，主代理不能重做运行中子任务或把中间回报当成完成。
+**reported 不等于 settled**；正式结束通知后再整合。`subagent_result` 只读已结束子代理最终消息，
+不唤醒子代理、不消耗额外模型回合。
 
-需要 **DSH 0.1.2-rc.1 ～ 0.1.5-rc.2**（两条线均已实测）与 DeepSeek API key（默认模型走 deepseek-official）。
-该范围之外的宿主**不受 0.5.2 支持**——DSH 0.1.1 及以下请用 oh-my-dsh-slim 0.4.0；**DSH 0.1.6 及更新
-（0.1.7 声明式 preset 线）**请等待即将发布的适配版本（见顶部版本说明）。
-0.5.0 **不支持更早的 DSH 版本**——DSH 0.1.1 及以下请使用 oh-my-dsh-slim 0.4.0（见顶部版本说明）。
+## 安装已发布版本（随后重启）
 
-**方式 A——插件市场 GUI（推荐）：** 在 DSH web GUI 打开 **设置 → 插件**，在市场里搜索
-`oh-my-dsh-slim` 并安装。也可在
-[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 目录中找到。
+桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。维护者发布此版本后，在管理器的安装入口填写固定版本：
 
-**方式 B——CLI 命令：**
-
-```bash
-dsh plugin --profile web add oh-my-dsh-slim
+```text
+oh-my-dsh-slim@0.6.1-native.3
 ```
 
-包内自带播种器，会自动把预设物化到
-`$DSH_HOME/.agent-presets/oh-my-dsh-slim`（升级随插件版本走，旧目录自动备份）。
+本 PR 不会创建 npm 发布或 Git 标签。正式发布前，只使用维护者审查过的明确提交，
+不要替换为持续变动的开发分支。官方源码与发布标签见
+[ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim/releases)。
 
-> ℹ️ 默认部署（home 为 `~/.dsh`）直接执行即可。若你的部署使用了自定义 home
-> （如桌面 App 的隔离环境），请先设置 `DSH_HOME` 再执行——方式 A 的市场 GUI 会自动解析。
-
-**方式 C——git clone：**
+以下 CLI 命令仅适用于非桌面管理的 profile，且需等待版本发布：
 
 ```bash
-git clone https://github.com/ninipa/oh-my-dsh-slim "$DSH_HOME/.agent-presets/oh-my-dsh-slim"
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1-native.3
 ```
 
-装完即生效：新建会话时在 **设置 → Agent 预设** 里选择「极简角色委派」。
+本地 checkout 也可：
 
-- **更新**：`cd "$DSH_HOME/.agent-presets/oh-my-dsh-slim" && git pull`（或升级插件），然后
-  **重启 DSH**——插件代码（工具 schema、注入提醒）每进程只挂载一次，仅开新会话不会加载新代码
-- **回滚**：`git checkout <旧 tag>` 或直接删目录。预设按会话创建时锁定，运行中会话不受影响。
+```bash
+dsh plugin --profile <profile> add ./oh-my-dsh-slim
+```
 
-## 配置
+`dsh plugin` 安装到 `$DSH_HOME/profiles/<profile>/`，并归并进 profile 的 `dsh.profile.bundles`
+层列表。执行前请确认 `DSH_HOME` 是目标部署实际使用的 home；桌面 App 可能使用隔离 home 而非 `~/.dsh`。
 
-零配置即可使用（内置默认值随预设分发）。用户配置按以下优先级读取：
+安装或后续更新后**完整重启 DSH**，然后在原生 **设置 → Agent 预设** 中选择「极简角色委派」新建会话。
+插件代码每宿主进程只挂载一次，仅新建会话不会加载更新代码。以上命令是操作说明，不代表本次已修改
+正在运行的用户安装。
 
-1. `OH_MY_DSH_SLIM_CONFIG` 环境变量指向的文件（测试/CI 通道）
-2. **宿主设置命名空间 `oh-my-dsh-slim`**（推荐）：随 npm 包安装的播种器会注册该命名空间，
-   配置写在宿主 `settings.yaml` 的 `oh-my-dsh-slim:` 段；effort/temperature 每次委派实时读取
-   （改动即时生效），模型/maxTokens 对新会话生效
-3. 旧版 `$DSH_HOME/oh-my-dsh-slim.json` 文件（无 settings 服务的宿主的回退通道）。安装了
-   npm 包的宿主首次启动时会把它自动导入 settings 命名空间并归档为
-   `oh-my-dsh-slim.json.imported-<时间戳>`
+- **更新**：从官方发布说明选择已发布的明确版本。rc.2 桌面管理器可能要求先卸载再安装；
+  请先备份设置，卸载时保留配置，完成后重启 DSH。
+- **卸载**：`dsh plugin --profile <profile> remove oh-my-dsh-slim`，然后重启。
+  不会播种预设目录；移除包不承诺删除原生用户设置或保留的旧 JSON。
+- **DSH ≤0.1.5：** 使用 `oh-my-dsh-slim@0.5.3`，按该历史版本的说明安装。
+  本原生版本线要求 DSH ≥0.2.0-rc.2；0.1.6/0.1.7 用户需要升级宿主。
 
-三种通道共用同一份文档结构（schema 见
-[oh-my-dsh-slim.schema.json](./oh-my-dsh-slim.schema.json)）：
+## 原生预设与设置
+
+组合包补丁声明 `preset-oh-my-dsh-slim`（`@deepseek-ai/dsh-agent-preset` 行）与 profile 平面的
+伴生行 `omds-seeder`。预设的 `config.plugins` 就是其插件列表。包内行使用由 `import.meta.url`
+构造的绝对 `file:` URL，避免相对路径按声明补丁解析导致的静默失效。
+不会创建 `$DSH_HOME/.agent-presets/` 目录。
+
+伴生行声明带 volatile 可编辑字段的宿主原生 `Config` schema，设置服务可描述并将修改持久化到当前
+profile。**这不证明桌面 GUI 已自动渲染角色配置表单**；宿主文档说明 autoGenerate 元数据尚无随附客户端
+使用。因此恢复的是历史自定义卡片，通过 rc.2 的 configForms/plugins.item 接入，并保留原编辑助手与
+revision 防冲突写入。`/omds` 命名配置采用本包专有配置行持久化及原生 registry 重建；隔离真实宿主
+已验证创建/保存、防冲突、既有上下文隔离、原生默认选择和重启恢复。浏览器渲染及在线模型/MCP 尚未
+针对本纠正版重新验收。默认会话预设通过宿主原生 Agent 预设设置选择。
+完整差异见 [兼容审计](./COMPATIBILITY-AUDIT.md)。
+
+命名记录改存于当前 profile 的 patch，不再复制预设目录；卸载本包后不再注册其定义。这不会自动删除
+旧 JSON 或旧预设目录，也不会自动导入/改写旧目录。新声明式记录没有旧 persona 重写问题，因此迁移
+接口返回未变更结果；它不是旧目录导入器。
+
+### 配置优先级
+
+零配置使用随包默认值。覆盖来源按优先级从高到低：
+
+1. `OH_MY_DSH_SLIM_CONFIG` 指定文件（测试/CI）。
+2. 当前命名预设的持久化配置文档（包含空快照），或挂载副本旁存在的旧 `profile.json` 快照。
+3. DSH 原生插件设置 `oh-my-dsh-slim`。
+4. 无可用原生设置文档时回退到旧 `$DSH_HOME/oh-my-dsh-slim.json`。
+5. 随包 defaults 与运行时基础值。
+
+旧 JSON **仅在原生 user layer 为空时导入**，绝不覆盖已有原生用户设置。导入会校验内容及 revision，
+失败只警告并跳过。原 JSON 无论成功与否都**不会被修改、改名、归档或删除**。
+显式测试文件或旧 profile 快照可优先于原生表单；如期待 GUI 修改为权威值，请先移除这些覆盖。
+
+旧命名配置与紧凑角色配置都接受，例如：
 
 ```json
 {
   "preset": "my-dsh-normal",
-  "presets": {
-    "my-dsh-normal": {
-      "fixer": { "model": "kimi-k3", "effort": "high" },
-      "librarian": { "mcps": ["context7", "gh_grep"] }
-    }
+  "roles": {
+    "oracle": { "provider": "deepseek-official", "model": "deepseek-v4-pro", "effort": "max" },
+    "librarian": { "mcps": ["context7", "gh_grep"] }
+  },
+  "mcpServers": {
+    "context7": { "transport": "streamable-http", "url": "https://mcp.context7.com/mcp" },
+    "gh_grep": { "transport": "streamable-http", "url": "https://mcp.grep.app" }
   }
 }
 ```
 
-- 可按角色覆盖 `enabled`/`model`/`effort`/`deny`/`mcps`；`temperature`/`maxTokens` 属高级键
-  （`advanced.roles.<roleId>`）
-- **思考强度取值**：`none` = 完全不发送 `reasoningEffort` 参数（适用于不支持思考强度的模型，
-  如本地 LLM）；`off` = 发送 `reasoningEffort: "off"` 明确关闭推理（模型需支持该参数）。
-  其余档位（`low`/`medium`/`high`/`max`/`xhigh` …）**按所选模型收敛且集合开放**：档位 id 由各
-  适配器自己定义，因此配置侧接受任何形状合法的档位 token（在这台机器上能保存的配置，换到另一台
-  也依然合法），是否被该模型接受在委派时判定——不支持的档位在第一次委派即显式报错，并列出该模型
-  声明的档位与其适配器默认值。GUI 卡片的 effort 下拉按各模型声明集合生成，显式越界值行内警告并
-  阻止保存
-- **模型名校验**：委派时按你在「设置-模型」导入的 provider 目录实时校验——填了不存在的模型，
-  第一次委派即报错并列出全部可用模型（含 vision-capable 子集），不会静默失败
-- **observer 锁定**：`observer.enabled: true` 会被忽略并警告（原因见上）
-- 修改后**新会话生效**，运行中会话不受影响
+- 紧凑 `roles` 高于 `presets[<name>]`；`advanced.roles.<roleId>` 最后合并。
+  局部覆盖保留随包角色字段；文档选择阶段数组整体替换，角色 deny 合并以保留限制。
+- 角色键包括 `enabled`、`provider`、`model`、`effort`、`temperature`、`maxTokens`、`tools`、
+  `deny`、`mcps`、`personaAppend`。非空 `tools` 为穷举白名单；空数组表示未配置，不是禁止全部工具。
+- effort 只校验 token 形状，不限于随包 `off`/`low`/`high`/`max`。委派时检查模型元数据并报告不匹配。
+  修改 effort 时校验；模型元信息查询失败保留原版 fail-open 行为。`none` 保留宿主已解析的 effort。
+- 模型、token 与工具组合修改应使用新会话。effort 与 temperature 每次委派请求重读；
+  这不意味着插件安装可以实时生效。
 
-**GUI 配置卡片**（随 npm 包分发）：安装后「设置 → 插件 → 插件配置」出现卡片——每个角色的
-启用/模型/思考强度可直接编辑，高级子区含 token 上限与温度（带默认值告警），模型下拉与对话输入框
-选择器同源。**effort 下拉按所选模型声明的思考档位收敛**（不支持档位自动隐藏；显式越界会行内
-警告并阻止保存）。orchestrator 仅展示说明：它是当前会话主模型，在对话输入框的选择器中更换
-（默认模型在 设置-模型 维护）。保存后会提示生效语义（思考强度/温度立即生效；模型/token/启停
-新会话生效）。
+## 官方角色作用域 MCP 已恢复
 
-**对话式配置**（无需手编 JSON）：在会话里直接说，例如"帮我把 fixer 的模型换成 kimi-k3"或
-"关闭 oracle 角色"——主模型会按 schema 修改上述 JSON。
+原生角色 MCP 行把宿主自己的 **`@deepseek-ai/dsh-mcp-client`** 挂载到对应角色的准确 Agent context。
+每个角色的 `mcps` 从 `mcpServers` 选择连接；默认 librarian 选择 context7 与 gh_grep。
+这是实际的作用域原生客户端挂载，**不再只是 persona 提示或配置声明**。官方客户端负责 transport、
+工具、资源、prompt 与重连；预设只负责作用域选择、就绪屏障及释放。
 
-**多命名配置（multi-preset）**：设置卡片顶部新增「**委派配置**」下拉（安装播种器后出现，roster
-由它的 `/omds` RPC 提供），用于管理多套命名配置——每套配置对应一个**原生 Agent 预设**：
+MCP 启动语义按原版保留：仅可续聊后台子代理挂载，首次提示组装最多等待 20 秒，连接失败不阻断
+首个模型请求；刷新首次工具快照，后续轮次不重复等待。8 项 scope 生命周期回归通过，覆盖快照刷新、
+失败开放、超时及清理。**在线远程 MCP 连通性与 provider/MCP E2E 仍未验证**。
+MCP 服务可用性、鉴权与定价不是本包保证。
 
-- 下拉恒有「极简角色委派」（内置 profile，未改动前就是新会话默认）与「＋ 新建配置」。
-  选择「＋ 新建配置」会**原地编辑一份草稿**（复制当前正在编辑的配置），点保存前**不写任何
-  数据**；首次点保存时才要求输入**显示名称**（内部 ID 由名称自动生成、之后不再改变）。
-- 「恢复默认」只恢复**当前正在编辑的内容**，不删除任何配置、不清空 roster。
-- 下拉选择只表示"正在编辑哪个配置"，**不会切换当前会话**；新会话实际用哪个配置由原生
-  **Agent 预设**选择器及其默认值决定——卡片上的「设为新会话默认」按钮写入的就是那个原生
-  设置（与点击 Agent 预设页卡片是同一处写入），两侧永远一致。
-- 保存后的配置会变成真实 agent 预设：`$DSH_HOME/.agent-presets/profile-<前缀>-<hash>/`
-  目录，可在 Agent 预设选择器中像任意预设一样选用。各配置的角色设置存于**自己的快照**
-  （组合文件旁的 `profile.json`），因此多套配置互不串扰。
+**MCP 信任边界**：Agent 本层注册的 MCP 工具不受继承 `toolFilter` 限制。
+只读角色策略限制的是继承的内置工具，**不会自动把任意配置的 MCP 服务器变成只读**。
+当前批准的默认 context7/gh_grep 是调研工具。添加具备写入/修改能力的 MCP 前需信任服务器并检查工具，
+不要把角色的「只读」标签当成防止远程副作用的通用保证。
 
-## web_fetch（跟随宿主）
-
-宿主 DSH ≥ 0.1.2 默认内置 `web_fetch`（自带 SSRF 防护），预设会话与委派子代理直接继承宿主
-默认。本预设不再自带 fetch provider 接线，也不再提供 `webFetch` 开关：旧版的
-「进阶配置：启用 web_fetch」与 `web-fetch-gate` 插件已退役。`web_search` 仍由 host web
-service 提供。
-
-## 即将发布（Roadmap）
-
-- **observer 重新启用**——等上游 DSH 支持「消息附件转发进子代理」（见角色矩阵中的说明）。
-
-## 自检与测试（全部零费用）
+## 验证与边界
 
 ```bash
-# 静态校验（结构/键位/persona 死引用/软禁用断言）
-node scripts/t0-validate.mjs .
-
-# 单元测试（配置合并/effort 注入/角色委派契约/subagent_result/settings schema/
-# sandbox 剥离/提前收口账本/播种器/profile RPC//omds 传输层/GUI 卡）
-node scripts/test-config-loader.mjs && node scripts/test-effort-plugin.mjs
-node scripts/test-role-subagent.mjs && node scripts/test-subagent-result.mjs
-node scripts/test-settings-schema.mjs && node scripts/test-sandbox-strip.mjs
-node scripts/test-early-close-context.mjs && node scripts/test-preset-seeder.mjs
-node scripts/test-profile-rpc.mjs && node scripts/test-client-card.mjs
-node scripts/test-omds-rpc.mjs && node scripts/test-host-version.mjs
-
-# 宿主契约探针电池（9 探针 / 10 阶段，零模型）——每次 DSH 升级后必跑。
-# 自动搭建临时 DSH_HOME（无需凭据）；详见 scripts/TEST-INVENTORY.md
-node scripts/run-host-probes.mjs          # --list / --only <name> / --keep 见 --help
-
-# web 模式传输层探针（零模型）：起真实 web 宿主，验证卡片 /omds 通道（注册/信任栅栏/信封/
-# 一键迁移配置）；`--dsh <安装目录>` 可指向另一个宿主版本做跨版本核验
-node scripts/probe-omds-web.mjs
-
-# 真模型验收（计费）：搭临时 home 让顶层与**每个角色**都指向同一个模型，跑隔离冒烟 + ECC 结算探针；
-# 模型是参数：--provider/--model/--effort（默认 opencode-ds-v41-flash/deepseek-flash @ low）
-node scripts/run-real-models.mjs
+npm test
 ```
 
-## 验收任务清单
+运行仓库的 `node --test test/*.test.mjs` **单元/契约测试**，涉及包结构、原生设置与导入安全、角色路由、
+请求/结果处理、生命周期及 MCP 作用域。mock 宿主、provider 与 MCP 的测试不是真实 provider 验收。
+历史对比基线随仓库收录于 `test/fixtures/upstream-v0.5.3/`，以固定原始 Git blob 哈希核验；
+测试不依赖 `.git` 或完整克隆历史。需要已安装宿主参照物的集成用例在参照物缺失时显示明确跳过原因。
+`semver` 固定为开发依赖，版本范围交叉校验不再依赖 npm 自带副本。
 
-[GUI-TEST-TASKS.md](./GUI-TEST-TASKS.md) 提供 7 个非显式派发场景的验收任务（含提示词与预期行为），
-可用于新环境部署后的行为核对。T3 依赖 [examples/omo-probe-baseline](./examples/omo-probe-baseline)
-基线项目。
+基础 smoke 直接调用 profile 后端，**不验证 `/omds` 的 HTTP 路由注册**。
+传输层验收可单独运行 `test/web-host-smoke.cjs`：将 `DSH_HOST_ANCHOR` 设为已安装 DSH 的绝对 JS 入口，
+使用该宿主 Node 运行时；打包 Electron 需 `ELECTRON_RUN_AS_NODE=1` 和 `--expose-internals`。
+它组合真实 `dsh-web-app`，使用隔离 home/profile 与回环临时端口，不替换当前 GUI。
+已安装 rc.2 的 web smoke 五项哨兵全通过：鉴权与 Host/Origin 栅栏、五个 profile RPC 方法及冲突处理、
+无效协议 envelope、完整重启后的持久化，以及路由卸载；两次启动均断言所有启用的宿主行处于 active 状态。
+测试使用实际发布包 patch；非客户端导出子入口避免重复客户端模块所有权。
+尚未验收浏览器视觉渲染、真实浏览器客户端执行或进行中的 HTTP 取消。
 
-## 已知边界
+另行完成的**真实打包 DSH 0.2.0-rc.2 无网络 smoke 已通过**：使用已安装 ASAR 的 Electron 44 / Node 24，
+隔离 `DSH_HOME`，启动 dsh-base、原生预设 registry、伴生行与预设；角色 roster 及完整组合
+`registry.resolve` 健康、无 broken 行。没有修改桌面用户安装，也没有 LLM、provider 或 MCP 网络请求。
+这只证明打包加载与原生宿主组合接入，不等于真实 provider E2E，也不证明 context7/gh_grep 远程工具可用。
+后续 E2E 需要凭据、网络及明确安装并重启过的目标 profile。
 
-- **升级后需要重启 DSH**：agent-plane 组合**每宿主进程只挂载一次**——配置行（persona 文本、
-  模型路由）每会话重新解析，但插件代码（工具 schema、工具描述、注入提醒字符串）冻结在进程内。
-  升级插件/预设后必须重启 DSH；仅开新会话跑的仍是旧代码
-- **非 vision 主模型无法接收粘贴图片**：DSH 在发送时按主模型能力硬拦
-  （`MODEL_DOES_NOT_SUPPORT_IMAGES`）。需要图片分析请换 vision 主模型（如
-  deepseek-v4-flash-vision-exp）直读，或等上游支持附件转发。若你的模型实际支持图像但
-  仍被拦截，检查 provider 配置中该模型是否声明了图像输入能力
-  （`input: ["text", "image"]`）——第三方 GPT 类模型常见此缺漏
-- **web_search 走独立计费**：librarian 优先使用 MCP（免费通道）；web_search 由宿主搜索服务承担，
-  每次调用产生一次独立的辅助模型请求，开放式调研任务建议在提示词中给出搜索预算
-- **委派子代理无法升级沙箱权限——预设会剥离多余升级字段（`sandbox-strip` 插件，属 workaround）**：
-  DSH 在启动时固定了子代理的文件策略与审批状态，但 `bash`/`edit`/`write` 工具 schema 仍暴露可选的
-  `sandbox_permissions`/`justification` 字段；部分模型会无意识地填上这些字段，而子代理本就无法升级，
-  多余参数只会触发参数校验错误（`invalid justification`、`not strictly wider`）。随预设分发的
-  `sandbox-strip` 插件会在 `tools/pre-execute` 阶段移除角色子代理调用中的这两个字段，并在结果末尾
-  附加 `[sandbox: stripped ...]` 提示让模型看到修正。在本预设自己的**顶层会话**中，它还会剥离
-  那些在任何审批前都必然被拒的形态（空 justification、单字段配对、非更宽模式——用宿主同一张
-  `WIDER_MODES` 表判定）；**合法升级请求（更宽模式 + 非空理由）保留，照常请求批准**。不使用本
-  预设的会话不会加载该插件，行为零变化。这是预设层的临时缓解而非根治：真正修复在上游——DSH
-  不应向权限已固定的子代理暴露升级字段
-- **后台子代理与「提前收口」（`early-close-context` 插件）**：DSH 是回合制——模型要么输出要么
-  结束回合，机制层面无法强制等待后台子代理；部分模型会在子代理仍在运行时输出最终结论（谎称
-  "已完成"而未整合子代理结果）。随预设分发的 `early-close-context` 插件用**事实供给**缓解：
-   system prompt 每回合注入"当前运行中的后台子代理"块（与宿主 `sandbox:policy` 同一动态机制）、
-   每次派发成功的结果附加 "Decision point" 提醒、persona 增加"子代理未 settle 前不得声称完成"
-   条款。账本三态（running → reported → settled）：子代理的中间回报（宿主句式
-   "Agent <id> sent a message:"）被明确标注为
-   "已回报内容，等待正式完成通知（reported ≠ 完成）"，只有 finish 通知才算结算。模型仍可能在
-   子代理完成前结束回合（无强制等待），但不再谎报完成——settle 通知会唤醒主模型整合结果
-- **自定义配置预设保留创建时的插件版本**：每个配置是创建时对内置预设目录的完整复制；升级 npm
-  包只会重播种内置预设，旧配置目录会保留当时的插件拷贝——重建或重新复制该配置才会获得新插件
-  （配置快照本身不受影响，只是插件会"变旧"）
+其他边界：
 
-## 致谢
+- `sandbox-strip` 剥离固定权限子代理中的无效升级字段；合法顶层升级仍受宿主审批控制。
+  这是预设 workaround，不是上游权限模型修复。
+- `early-close-context` 提供 running/reported/settled 事实与提醒，但不能强制模型等待或保证遵守。
+- `web_search` 使用宿主搜索服务，可能产生独立辅助模型费用。
+- 宿主模块从 loader 自身 base 与模块实例导入，涵盖打包桌面解析。
+  研究过 Lyrissonare 的 discovery workaround，但本包 **不依赖该 fork 或其包**。
 
-- [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)（MIT © 2025
-  alvinunreal）——角色体系与 persona 来源
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)——宿主平台
+## 署名与历史
 
-## License
+- [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)（MIT © 2025 alvinunreal）：
+  角色体系与 persona 来源。
+- [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my-dsh-slim)：上游 DSH 移植。
+- [E2E-AK-OI/oh-my-dsh-slim](https://github.com/E2E-AK-OI/oh-my-dsh-slim)：通过 cherry-pick 引入的
+  native foundation，保留原作者署名。此为来源说明，不代表本次兼容性更新完成了 E2E 验证。
+- [Lyrissonare/oh-my-dsh-slim](https://github.com/Lyrissonare/oh-my-dsh-slim)：研究 discovery workaround，
+  未引入运行时或包依赖。
+- [Henry-916/oh-my-dsh-slim](https://github.com/Henry-916/oh-my-dsh-slim)：原生兼容性更新的贡献分支。
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：宿主平台。
 
-[MIT](./LICENSE)
+当前兼容性变更与明确标记的上游历史记录见 [CHANGELOG.md](./CHANGELOG.md)。许可证：[MIT](./LICENSE)。

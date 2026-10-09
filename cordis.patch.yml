@@ -1,11 +1,32 @@
 # oh-my-dsh-slim bundle patch (repository manifest)
 #
-# Declared so `dsh plugin --profile web add github:ninipa/oh-my-dsh-slim`
-# installs the preset seeder, which materializes the full preset into
-# $DSH_HOME/.agent-presets/oh-my-dsh-slim. The shipped npm package
-# (oh-my-dsh-slim on npmjs, built from npm-package/) carries the same
-# declaration; this root-level manifest keeps the GitHub-side entry valid
-# for `dsh plugin add` and the marketplace submission gate.
+# DSH 0.2.0 loads agent presets declaratively: a bundle patch inserts an
+# `@deepseek-ai/dsh-agent-preset` row whose `config.plugins` IS the preset. This
+# row IS the preset "oh-my-dsh-slim" — there is no directory under
+# $DSH_HOME/.agent-presets and nothing is copied at runtime.
+#
+# Install:
+#   dsh plugin --profile <non-desktop-profile> add oh-my-dsh-slim@0.6.1-native.3
+# Use this spec after publication by ninipa/oh-my-dsh-slim; before release,
+# install an explicitly reviewed commit, never a moving development branch.
+# Desktop installs/updates are managed only through its plugin manager.
+# or add this repository's path to the profile's `dsh.profile.bundles`. Either
+# way the loader mounts preset row below plus the companion row that reports
+# what was registered.
+#
+# The preset itself is a JS module: the loader reaches a row's plugin with
+# import(), so this row may name a .js file (or a bare package) but never a .yml
+# one. preset.js returns the same bundle patch shape this file has.
+#
+# Exported subpaths mark preset/registry rows as non-client modules; only the
+# bare root companion contributes the package's browser module. This prevents
+# multiple active client sources from the same package on a full web host.
+# The shipped npm package carries the same declaration; test/package.test.mjs
+# verifies that the two export maps resolve the same source modules.
 - insert:
-    - id: omds-preset-seeder
+    - id: preset-oh-my-dsh-slim
+      name: 'oh-my-dsh-slim/preset'
+    - id: oh-my-dsh-slim-profiles
+      name: 'oh-my-dsh-slim/profile-registry'
+    - id: oh-my-dsh-slim
       name: 'oh-my-dsh-slim'

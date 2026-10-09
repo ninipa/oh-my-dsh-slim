@@ -32,51 +32,40 @@
 // Scope: preset-only composition (like sandbox-strip); non-preset sessions
 // never load it. In-process continuation provider required (listChildren).
 //
-// Compat: 0.1.1-rc.2 .. 0.1.2-alpha.1 — subagents API unchanged (checked in
-// the 2026-08-29 source survey; UPGRADE-CHECKLIST §7.1).
+// Compat: DSH 0.2.0-rc.2 uses Session snapshots and listDescendants for
+// live activity; listChildren alone exposes durable catalog identities only.
 
-import { createRequire } from 'node:module';
-import { execSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { assertHostCompatible } from './host-version.js';
+import { hostImport } from './bridge.js';
 
-function resolveDshPackage() {
-  const roots = [];
-  if (process.env.DSH_HOME) {
-    roots.push(join(process.env.DSH_HOME, 'profiles', 'node_modules'));
-    roots.push(join(process.env.DSH_HOME, 'profiles', 'web', 'node_modules'));
-  }
-  const probeOptions = { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] };
-  for (const command of ['npm root -g', 'zsh -lic "npm root -g"']) {
-    // zsh -lic sources the user's login+interactive shell config, which can hang
-    // (reported on Linux); every probe is bounded and silent on stderr.
-    try {
-      roots.push(execSync(command, probeOptions).trim());
-      break; // first reachable npm root wins; the zsh fallback only runs when plain sh lacks npm
-    } catch {}
-  }
-  try {
-    const dshBin = realpathSync(execSync('command -v dsh', probeOptions).trim());
-    const packageDir = dirname(dirname(dshBin));
-    roots.push(dirname(dirname(packageDir)));
-  } catch {}
-  roots.push(join(dirname(process.execPath), '..', 'lib', 'node_modules'));
-  roots.push('/opt/homebrew/lib/node_modules', '/usr/local/lib/node_modules');
-  const root = roots.find((candidate) => existsSync(join(candidate, '@deepseek-ai/dsh/package.json')));
-  if (!root) throw new Error('early-close-context: cannot locate the DSH node_modules; set DSH_HOME or run inside DSH');
-  return join(root, '@deepseek-ai/dsh/package.json');
+/**
+ * The host's own message constructor, loaded from the installed DSH instead
+ * of from a local copy: the reminder must be the very same message shape the
+ * host agent loop reads, and only one copy of that module may exist here.
+ */
+let messageModule;
+function loadMessageModule(ctx) {
+  messageModule ??= hostImport(ctx, '@deepseek-ai/dsh-llm').then((mod) => {
+    if (typeof mod.createUserMessage !== 'function') {
+      throw new Error('early-close-context: the host @deepseek-ai/dsh-llm does not export createUserMessage');
+    }
+    return mod;
+  });
+  return messageModule;
 }
 
-const require = createRequire(resolveDshPackage());
+/**
+ * Build the decision-point reminder; awaits the host module on first use.
+ */
+async function roleMessage(ctx, body) {
+  const { createUserMessage } = await loadMessageModule(ctx);
+  return createUserMessage({
+    content: [{ type: 'text', text: body }],
+    source: { kind: 'oh-my-dsh-slim/early-close-context' },
+  });
+}
 
-const { createUserMessage } = require('@deepseek-ai/dsh-llm');
-
-
-// Host compatibility gate: one throw here aborts the whole preset mount (fail-fast).
-assertHostCompatible();
 export const name = 'early-close-context';
-export const inject = ['systemPrompt', 'subagents'];
+export const inject = ['systemPrompt', 'subagents', 'loader'];
 
 /** Prompt order: right after role-subagent's delegation-policy section (116.5). */
 export const RUNNING_SECTION_ORDER = 117;
@@ -196,6 +185,7 @@ export function isDelegationTool(name) {
 }
 
 export function apply(ctx, config) {
+  const compositionScope = ctx.loader !== undefined ? hostImport(ctx, '@deepseek-ai/dsh-scope') : undefined;
   /** childId -> { role, label, parentId, since, sinceLabel, childId, status } */
   const ledger = new Map();
   /** Parent ids that have started a delegation in this composition. */
@@ -272,13 +262,16 @@ export function apply(ctx, config) {
     const kind = classifyDeliverySource(message?.source);
     if (kind === void 0) return;
     applyDeliveryForParent(parentId, message.source.senderSessionId, kind);
-  });
+  }, { global: true });
 
   /** Incremental replay: recover deliveries that happened before the live listener. */
   function scanSessionEvents(session, parentId) {
-    const from = lastScanSeq.get(parentId) ?? 0;
+    const from = lastScanSeq.get(parentId) ?? -1;
     let last = from;
-    for (const event of session.events ?? []) {
+    const events = typeof session.snapshotEvents === 'function'
+      ? session.snapshotEvents(Math.max(from + 1, session.inheritedEventCount ?? 0))
+      : session.events ?? [];
+    for (const event of events) {
       const seq = typeof event.seq === 'number' ? event.seq : 0;
       if (seq <= from) continue;
       if (seq > last) last = seq;
@@ -294,6 +287,11 @@ export function apply(ctx, config) {
   // Track role delegations at the pre-execute waterfall (works for both the
   // preset's role tools and any stock subagent tool that may be enabled).
   ctx.on('tools/pre-execute', async (exec, next) => {
+    if (compositionScope) {
+      const scope = await compositionScope;
+      const owner = scope.scopeOf(ctx);
+      if (owner === undefined || !exec?.agent?.ctx || !scope.scopeChainOf(scope.scopeOf(exec.agent.ctx)).includes(owner)) return next();
+    }
     if (exec?.agent && isDelegationTool(exec.name)) {
       const parentId = exec.agent.session?.id;
       if (typeof parentId === 'string') trackedParents.add(parentId);
@@ -304,10 +302,10 @@ export function apply(ctx, config) {
       });
     }
     return next();
-  });
+  }, { global: true });
 
   // Successful delegation -> ledger + decision-point reminder on the result.
-  ctx.on('tools/post-execute', (exec, result, next) => {
+  ctx.on('tools/post-execute', async (exec, result, next) => {
     const info = pending.get(exec);
     pending.delete(exec);
     if (info === void 0 || result.isError) return next();
@@ -334,12 +332,9 @@ export function apply(ctx, config) {
     // ({role, content, source}) — not a bare text object.
     return {
       kind: 'accept',
-      additionalContexts: [createUserMessage({
-        content: [{ type: 'text', text: `Decision point: background ${info.role} "${info.label}" (${childId}) is now running and has NOT settled. A report from this subagent may arrive before its finish notice — treat the finish notice, not the report, as completion. Do not output a final conclusion until you receive its settle notice (or explicitly report it as still running). After dispatching, end your turn with a brief status note; keep this turn only to dispatch further independent lanes — do not redo the delegated scope yourself.` }],
-        source: { kind: 'plugin', plugin: 'early-close-context' },
-      })],
+      additionalContexts: [await roleMessage(ctx, `Decision point: background ${info.role} "${info.label}" (${childId}) is now running and has NOT settled. A report from this subagent may arrive before its finish notice — treat the finish notice, not the report, as completion. Do not output a final conclusion until you receive its settle notice (or explicitly report it as still running). After dispatching, end your turn with a brief status note; keep this turn only to dispatch further independent lanes — do not redo the delegated scope yourself.`)],
     };
-  });
+  }, { global: true });
 
   // Lazy async ledger refresh: keep only children the host still reports
   // running (the settle fallback — covers a lost/dropped finish notice).
@@ -352,9 +347,13 @@ export function apply(ctx, config) {
     lastRefreshAt.set(parentId, now);
     try {
       const signal = new AbortController().signal;
-      const rows = await ctx.subagents.listChildren(parentId, signal);
+      // rc.2 listChildren is a durable catalog, not a live inventory: settled
+      // ids remain there forever. listDescendants adds live activity from the
+      // host Session store. Only the caller's direct children belong here.
+      const rows = await ctx.subagents.listDescendants(parentId, signal);
       const running = new Set(rows
-        .filter((row) => row?.kind === 'child' && row.activity === 'running')
+        .filter((row) => row?.kind === 'child' && row.activity === 'running'
+          && row.parentId === parentId && row.depth === 1)
         .map((row) => row.id));
       for (const childId of [...ledger.keys()]) {
         const entry = ledger.get(childId);
@@ -362,7 +361,7 @@ export function apply(ctx, config) {
         if (!running.has(childId)) settleChild(parentId, childId);
       }
     } catch (error) {
-      const msg = `early-close-context: listChildren refresh failed: ${error instanceof Error ? error.message : String(error)}`;
+      const msg = `early-close-context: listDescendants refresh failed: ${error instanceof Error ? error.message : String(error)}`;
       if (process.env.ECC_DEBUG === '1') console.error(`[ecc] ${msg}`);
       ctx.logger?.warn?.(msg);
     }
