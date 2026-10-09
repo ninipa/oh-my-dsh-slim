@@ -8,10 +8,12 @@ an orchestrator plus five enabled specialist roles, delivered as a **declarative
 preset**. It mounts from the plugin bundle; it is not a standalone application or a preset
 directory to copy.
 
-> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested host: DSH 0.2.0-rc.2.** Later 0.2 releases,
-> including rc.3 and 0.2.0 final, are admitted by the version gate, not claimed as tested.
-> Upgrade policy: retain compatibility within the 0.2 line while the required APIs remain available;
-> verify new host releases before claiming support. The 0.3 line requires a separate review.
+> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested host: DSH 0.2.0-rc.2.** The gate follows npm range
+> semantics: later 0.2.0 prereleases (rc.3) and stable 0.2.x are admitted without a tested claim,
+> while prereleases of later patch versions — for example `0.2.1-alpha.2`, the current host `alpha`
+> tag — are refused until a release admits them. Upgrade policy: retain compatibility within the 0.2
+> line while the required APIs remain available; verify new host releases before claiming support.
+> The 0.3 line requires a separate review.
 > **DSH ≤0.1.5: stay on `oh-my-dsh-slim@0.5.3`.** Hosts between that line and rc.2 must upgrade DSH.
 > 0.6.1 passed 101 automated tests, six base-composition installed-host smoke sentinels, and the five
 > web-composition transport sentinels; the web smoke was independently reproduced on a plain npm/CLI
