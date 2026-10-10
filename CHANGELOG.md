@@ -4,6 +4,21 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.6.2] — plugin settings page on the DSH 0.2 desktop
+
+- The configuration card registers into the settings shell's `settings.section`
+  slot, the convention the DSH 0.2 desktop renders (its own General/Models pages
+  and third-party cards such as dsh-better-sidebar use it). The former
+  `plugins.item` registration is not rendered by that UI, so the card had no
+  visible entry.
+- Verified on an isolated DSH 0.2.0-rc.2 host with the plugin market installed:
+  the settings navigation shows the 极简角色委派 page.
+- The card opens expanded: on this host it is a settings page, so the content is visible
+  on entry instead of behind an extra click. Primitive lookups tolerate host generations
+  that rename or drop components (an unknown name renders nothing instead of crashing the
+  section), and the model catalog is probed defensively because 0.2 provides no nested
+  `remote.session` service.
+
 ## [0.6.1] — continuable tool-filter fix
 
 Released as `0.6.1`; the contributor's `0.6.1-native.1/2/3` labels were pre-release iterations of

@@ -105,9 +105,9 @@ function runApply(cardExports) {
     'locale dictionaries registered under the namespace');
   check(events.localeRegisters[0].dicts.zh && events.localeRegisters[0].dicts.en, 'zh + en dictionaries present');
   check(events.boundSpecs[0]?.namespace === 'oh-my-dsh-slim', 'settings scope bound to the namespace');
-  check(events.slotInjects[0] === 'plugins.item', 'card injected into the plugin-configuration slot');
+  check(events.slotInjects[0] === 'settings.section', 'card injected into the settings-page slot');
   const entry = events.registrations[0];
-  check(entry.options.id === 'oh-my-dsh-slim' && entry.options.name === 'plugins.item',
+  check(entry.options.id === 'oh-my-dsh-slim' && entry.options.name === 'settings.section',
     'slot entry claims the namespace (host × card intersection)');
   check(entry.options.order === 100, 'slot entry order=100 sorts the card after built-ins');
   check(entry.options.locale === 'oh-my-dsh-slim', 'slot entry carries the locale namespace');
@@ -502,7 +502,55 @@ console.log('\n[rc.2 contract + baseline preservation]');
   check(source.includes('await scope.mutate(writeOps, snap.revision);'), 'bundled settings writes pass the rc.2 revision fence');
   const legacy = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'legacy', 'v0.5.3', 'npm-package', 'client', 'client.js'), 'utf8');
   const helperRegion = (text) => text.slice(text.indexOf('    function parseAdvancedNumber'), text.indexOf('    // ----------------------------------------------------------------- apply')).replaceAll('\r\n', '\n');
-  check(helperRegion(source).replace('await scope.mutate(writeOps, snap.revision);', 'await scope.mutate(writeOps);') === helperRegion(legacy), 'historical helpers and complete card behavior are preserved apart from the rc.2 revision argument');
+  const normalize = (text) => text
+    .replaceAll('await scope.mutate(writeOps, snap.revision);', 'await scope.mutate(writeOps);')
+    // 0.2 primitives renamed the icon exports; the card resolves them at runtime.
+    .replaceAll('renderIcon(ui, ICON_WARNING, { size: 14 })', 'React.createElement(ui.IconWarningOutline16, { size: 14 })')
+    .replaceAll('renderIcon(ui, ICON_CHECK, { size: 14 })', 'React.createElement(ui.IconCheckOutline16, { size: 14 })')
+    .replaceAll('renderIcon(ui, ICON_CHEVRON, ', 'React.createElement(ui.IconChevronDownOutline14, ')
+    // 0.2 renders the card as a settings page; it opens expanded by default.
+    .replaceAll(
+      [
+        "      // Expanded by default: on DSH 0.2 the card is a settings page (the",
+        "      // `settings.section` slot), so the content should be visible on entry",
+        "      // instead of hiding behind an extra click. The header stays a toggle.",
+        "      const [cardOpen, setCardOpen] = React.useState(true);",
+      ].join('\n'),
+      [
+        "      // Collapsed by default (GUI acceptance): the tab lays out bare slot",
+        "      // cards with no host chrome — unlike built-in cards there is no",
+        "      // host-provided disclosure wrapper, so the card draws its own.",
+        "      const [cardOpen, setCardOpen] = React.useState(false);",
+      ].join('\n'),
+    )
+    // 0.2 provides no nested `remote.session` service; the card probes it defensively.
+    .replaceAll(
+      [
+        "        // Reading `remote.session` on a host that does not provide that nested",
+        "        // service throws inside cordis (the traceable proxy resolves nested",
+        "        // service names), so probe it defensively instead of with `?.`.",
+        "        let modelCatalog;",
+        "        try {",
+        "          const face = remote?.session;",
+        "          if (typeof face?.modelCatalog === 'function') modelCatalog = face.modelCatalog.bind(face);",
+        "        } catch {",
+        "          modelCatalog = undefined;",
+        "        }",
+        "        if (modelCatalog === undefined) {",
+        "          setModels({ status: 'error', groups: [] });",
+        "          return;",
+        "        }",
+        "        Promise.resolve(modelCatalog()).then((response) => {",
+      ].join('\n'),
+      [
+        "        if (remote?.session?.modelCatalog === undefined) {",
+        "          setModels({ status: 'error', groups: [] });",
+        "          return;",
+        "        }",
+        "        Promise.resolve(remote.session.modelCatalog()).then((response) => {",
+      ].join('\n'),
+    );
+  check(normalize(helperRegion(source)) === normalize(helperRegion(legacy)), 'historical helpers and complete card behavior are preserved apart from the rc.2 revision argument and the icon-name adaptation');
   for (const [manifestPath, expectedClient] of [['package.json', './npm-package/client/client.js'], ['npm-package/package.json', './client/client.js']]) {
     const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', manifestPath), 'utf8'));
     check(manifest.exports['./client'] === expectedClient, manifestPath + ': client export resolves the restored bundle');

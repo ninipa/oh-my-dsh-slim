@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.6.1 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.6.2 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -96,8 +96,9 @@ export map 解析；只有包根入口贡献浏览器客户端模块。
 
 伴生行声明带 volatile 可编辑字段的宿主原生 `Config` schema，设置服务可描述并将修改持久化到当前
 profile。**这不证明桌面 GUI 已自动渲染角色配置表单**；宿主文档说明 autoGenerate 元数据尚无随附客户端
-使用。因此恢复的是历史自定义卡片，通过 rc.2 的 configForms/plugins.item 接入，并保留原编辑助手与
-revision 防冲突写入。`/omds` 命名配置采用本包专有配置行持久化及原生 registry 重建；隔离真实宿主
+使用。因此恢复的是历史自定义卡片，通过 rc.2 的 configForms 与设置外壳的 `settings.section` 插槽接入
+（0.2 桌面就是用它渲染插件配置页），并保留原编辑助手与 revision 防冲突写入。卡片默认展开，
+模型下拉取自宿主自己的模型目录。`/omds` 命名配置采用本包专有配置行持久化及原生 registry 重建；隔离真实宿主
 已验证创建/保存、防冲突、既有上下文隔离、原生默认选择和重启恢复。浏览器渲染及在线模型/MCP 尚未
 针对本纠正版重新验收。默认会话预设通过宿主原生 Agent 预设设置选择。
 完整差异见 [兼容审计](./COMPATIBILITY-AUDIT.md)。

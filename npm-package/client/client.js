@@ -23,7 +23,14 @@ window.__ModuleLoader__.load({
     var exports = module.exports;
 
     const React = require('react');
-    const ui = require('@deepseek-ai/dsh-client-ui-primitives');
+    // Host generations rename primitives (0.2 dropped the `16` icon suffix and
+    // some glyphs entirely). An unknown name would otherwise be `undefined`,
+    // which makes React throw #130 and the whole settings section render empty.
+    // Structural components are still checked below; unknown names render nothing.
+    const uiPrimitives = require('@deepseek-ai/dsh-client-ui-primitives');
+    const ui = new Proxy(uiPrimitives, {
+      get: (target, prop) => (prop in target ? target[prop] : () => null),
+    });
 
     const NS = 'oh-my-dsh-slim';
     const ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
@@ -100,7 +107,22 @@ window.__ModuleLoader__.load({
       migrate: 'profile-migrate',
     });
 
-    const REQUIRED_PRIMITIVES = ['Button', 'Input', 'Modal', 'Toast', 'IconCheckOutline16', 'IconWarningOutline16'];
+    const REQUIRED_PRIMITIVES = ['Button', 'Input', 'Modal', 'Toast'];
+    // Icon names differ across host generations (0.2 primitives dropped the
+    // `16` suffix). Icons are cosmetic: resolve the first available name and
+    // render nothing when the host ships none of them, instead of disabling
+    // the whole card over a missing glyph.
+    const ICON_CHECK = ['IconCheckOutline16', 'IconCheckOutline', 'IconCheckOutlineRegular'];
+    const ICON_WARNING = ['IconWarningOutline16', 'IconWarningOutline', 'IconWarningOutlineRegular'];
+    const ICON_CHEVRON = ['IconChevronDownOutline14', 'IconChevronDownOutline', 'IconChevronDownOutlineRegular'];
+    function icon(mod, names) {
+      for (const name of names) if (mod?.[name] !== undefined && mod[name] !== null) return mod[name];
+      return null;
+    }
+    function renderIcon(mod, names, props) {
+      const component = icon(mod, names);
+      return component === null ? null : React.createElement(component, props);
+    }
     // Stable fallbacks for the settings snapshot fields: each render must NOT
     // mint a new object for values used in effect dependencies (a fresh {}
     // per render would refire the roster-load effect forever).
@@ -710,12 +732,12 @@ window.__ModuleLoader__.load({
             type: 'button', 'aria-label': t('advanced'), 'aria-expanded': advOpen,
             onClick: onAdvancedToggle,
             style: { background: 'none', border: 'none', cursor: 'pointer', color: color.tertiary, padding: 4, flex: 'none' },
-          }, React.createElement(ui.IconChevronDownOutline14, { size: 14, style: { transform: advOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s' } })),
+          }, renderIcon(ui, ICON_CHEVRON, { size: 14, style: { transform: advOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s' } })),
         ),
         role.effort === 'none' ? React.createElement('div', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('effortNoneHint')) : null,
         effortBad ? React.createElement('div', { style: { fontSize: 12, lineHeight: '16px', color: 'var(--dsw-alias-state-error-primary)' } }, t('effortMismatch')) : null,
         locked ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12 } },
-          React.createElement(ui.IconWarningOutline16, { size: 14 }), t('observerLocked')) : null,
+          renderIcon(ui, ICON_WARNING, { size: 14 }), t('observerLocked')) : null,
         advOpen ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, borderTop: `1px solid ${color.border}`, paddingTop: 8 } },
           React.createElement('div', { style: { display: 'flex', gap: 12 } },
             React.createElement(Field, { label: t('maxTokens') },
@@ -732,7 +754,7 @@ window.__ModuleLoader__.load({
           (invalid.maxTokens || invalid.temperature) ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } },
             invalid.maxTokens ? t('invalidMaxTokens') : t('invalidTemperature')) : null,
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12, background: color.warnBg, borderRadius: 8, padding: '6px 8px' } },
-            React.createElement(ui.IconWarningOutline16, { size: 14 }), t('advancedWarn')),
+            renderIcon(ui, ICON_WARNING, { size: 14 }), t('advancedWarn')),
         ) : null,
       );
     }
@@ -877,7 +899,7 @@ window.__ModuleLoader__.load({
           // 0.1.1 per-op scope.write (which is gone).
           await scope.mutate(writeOps, snap.revision);
           setDraft(undefined);
-          setToast({ text: doneText, icon: React.createElement(ui.IconCheckOutline16, { size: 14 }) });
+          setToast({ text: doneText, icon: renderIcon(ui, ICON_CHECK, { size: 14 }) });
         } finally {
           setSaving(false);
         }
@@ -914,7 +936,7 @@ window.__ModuleLoader__.load({
             )),
           }));
           setDraft(undefined);
-          setToast({ text: t('saved'), icon: React.createElement(ui.IconCheckOutline16, { size: 14 }) });
+          setToast({ text: t('saved'), icon: renderIcon(ui, ICON_CHECK, { size: 14 }) });
           return true;
         } catch (error) {
           setProfileError(profileErrorKey(error) === 'conflict' ? t('profileConflict') : t('profileSaveFailed'));
@@ -988,7 +1010,7 @@ window.__ModuleLoader__.load({
           setSelectedId(profile.id);
           setDraft(undefined);
           setNameModal({ open: false, input: '', error: undefined });
-          setToast({ text: t('saved'), icon: React.createElement(ui.IconCheckOutline16, { size: 14 }) });
+          setToast({ text: t('saved'), icon: renderIcon(ui, ICON_CHECK, { size: 14 }) });
           if (pendingSwitch) {
             commitSelect(pendingSwitch);
             setPendingSwitch(undefined);
@@ -1010,7 +1032,7 @@ window.__ModuleLoader__.load({
         try {
           await profileAdapter.setDefault(profileId);
           await refreshRoster();
-          setToast({ text: t('defaultSet'), icon: React.createElement(ui.IconCheckOutline16, { size: 14 }) });
+          setToast({ text: t('defaultSet'), icon: renderIcon(ui, ICON_CHECK, { size: 14 }) });
         } catch {
           setProfileError(t('profileDefaultFailed'));
         } finally {
@@ -1031,7 +1053,7 @@ window.__ModuleLoader__.load({
         try {
           await profileAdapter.migrate(profileId);
           await refreshRoster();
-          setToast({ text: t('profileMigrated'), icon: React.createElement(ui.IconCheckOutline16, { size: 14 }) });
+          setToast({ text: t('profileMigrated'), icon: renderIcon(ui, ICON_CHECK, { size: 14 }) });
         } catch {
           setProfileError(t('profileMigrateFailed'));
         } finally {
@@ -1097,10 +1119,10 @@ window.__ModuleLoader__.load({
         const defaultsDraft = buildDraft(base, base?.advanced);
         if (!deepEqualJson(defaultsDraft, baseline)) setDraft(defaultsDraft);
       };
-      // Collapsed by default (GUI acceptance): the tab lays out bare slot
-      // cards with no host chrome — unlike built-in cards there is no
-      // host-provided disclosure wrapper, so the card draws its own.
-      const [cardOpen, setCardOpen] = React.useState(false);
+      // Expanded by default: on DSH 0.2 the card is a settings page (the
+      // `settings.section` slot), so the content should be visible on entry
+      // instead of hiding behind an extra click. The header stays a toggle.
+      const [cardOpen, setCardOpen] = React.useState(true);
 
       const headerButton = React.createElement('button', {
         type: 'button',
@@ -1117,11 +1139,11 @@ window.__ModuleLoader__.load({
         React.createElement('span', { style: { display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 } },
           React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } },
             React.createElement('span', { style: { fontSize: 15, fontWeight: 600, lineHeight: '1.4', color: color.text } }, 'oh-my-dsh-slim'),
-            !cardOpen && dirty ? React.createElement(ui.IconWarningOutline16, { size: 14 }) : null,
+            !cardOpen && dirty ? renderIcon(ui, ICON_WARNING, { size: 14 }) : null,
           ),
           React.createElement('span', { style: { fontSize: 13, lineHeight: '1.5', color: color.tertiary } }, t('desc')),
         ),
-        React.createElement(ui.IconChevronDownOutline14, {
+        renderIcon(ui, ICON_CHEVRON, {
           size: 14,
           style: { transform: cardOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s', color: color.tertiary, flex: 'none' },
         }),
@@ -1159,7 +1181,7 @@ window.__ModuleLoader__.load({
         React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('selectionHint')),
         selectedProfile?.needsMigration === true
           ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: color.warn, lineHeight: '16px' } },
-            React.createElement(ui.IconWarningOutline16, { size: 14 }),
+            renderIcon(ui, ICON_WARNING, { size: 14 }),
             React.createElement('span', null, t('profileMigrationNeeded')),
             React.createElement(ui.Button, {
               variant: 'outline', size: 'sm', disabled: saving || !writable,
@@ -1172,7 +1194,7 @@ window.__ModuleLoader__.load({
           : null,
         profileError
           ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dsw-alias-state-error-primary)', fontSize: 12, lineHeight: '16px' } },
-            React.createElement(ui.IconWarningOutline16, { size: 14 }), profileError)
+            renderIcon(ui, ICON_WARNING, { size: 14 }), profileError)
           : null,
       );
 
@@ -1250,7 +1272,7 @@ window.__ModuleLoader__.load({
           t('orchestratorNote')),
         roleRows,
         !writable ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12 } },
-          React.createElement(ui.IconWarningOutline16, { size: 14 }), t('readOnly')) : null,
+          renderIcon(ui, ICON_WARNING, { size: 14 }), t('readOnly')) : null,
         React.createElement('span', { style: { fontSize: 11, color: color.tertiary } }, t('effectiveHint')),
         toast ? React.createElement(ui.Toast, { text: toast.text, icon: toast.icon, onDone: () => setToast(null) }) : null,
         ),
@@ -1267,27 +1289,34 @@ window.__ModuleLoader__.load({
 
     // ----------------------------------------------------------------- apply
     const name = NS;
+    // `remote` / `remote.session` exist on DSH 0.2 — the host's own Subagent
+    // settings page injects the same pair and calls
+    // `ctx.remote.session.modelCatalog()` for its model picker. Inject them so
+    // the card's dropdown gets the full provider/model catalog.
     const inject = ['slots', 'locale', 'connection', 'remote', 'remote.session', 'configForms'];
 
     function apply(ctx) {
-      const gaps = missingPrimitives(ui);
+      const gaps = missingPrimitives(uiPrimitives);
       if (gaps.length > 0) {
         console.warn('[oh-my-dsh-slim] host ui-primitives missing ' + gaps.join(', ') + ' — settings card disabled');
         return;
       }
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'oh-my-dsh-slim: dictionaries');
       const t = ctx.locale.bind(NS);
-      // rc.2 forms retain getSnapshot/subscribe/mutate, but their owner and
-      // page slot moved from settingsScope to configForms and plugins.item.
+      // DSH 0.2 desktop renders plugin configuration as a settings page: the
+      // settings shell draws the active `settings.section` entry (its own
+      // General/Models pages and third-party cards such as dsh-better-sidebar
+      // all register there). The older `plugins.item` slot is not rendered by
+      // that UI, so a card registered only there stays invisible.
       const scope = ctx.configForms.get(NS);
-      ctx.effect(() => ctx.configForms.whileServed([NS], () => ctx.slots.inject('plugins.item', () => ctx.slots.register({
-        name: 'plugins.item',
+      ctx.effect(() => ctx.configForms.whileServed([NS], () => ctx.slots.inject('settings.section', () => ctx.slots.register({
+        name: 'settings.section',
         id: NS,
         order: 100,
         label: () => BUNDLED_PROFILE_NAME,
         locale: NS,
         inject: () => ({ t }),
-      }, () => React.createElement(SettingsCard, { t, scope, connection: ctx.connection, remote: ctx.remote })))), 'oh-my-dsh-slim: configuration card');
+      }, () => React.createElement(SettingsCard, { t, scope, connection: ctx.connection, remote: ctx.remote })))), 'oh-my-dsh-slim: settings page');
     }
 
     exports.name = name;
