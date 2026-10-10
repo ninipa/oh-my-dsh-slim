@@ -41,6 +41,57 @@ Full web restart additionally exposed duplicate client-module source ownership: 
 
 Current review validation: full unit/contract suite 101/101 with zero skips using extracted rc.2 host references; existing installed-ASAR base smoke passes all six sentinels. A source export with no `.git` and an empty `PATH` passes 95 tests with six explicit host-reference skips; local installed development dependencies were reused via a junction, not represented as a fresh network install. Frozen-lockfile installation and npm package dry-run pass; the new transport helper is included. Installed-ASAR full web HTTP smoke now passes all five explicit sentinels: unauthenticated 401 and invalid Host/Origin 403, real launch-token cookie authentication, list/create/save/default/migrate with stale revision checks, native malformed envelope validation, persisted records/default after full restart, and `/omds` removal on companion disposal. Every enabled host row is asserted active after both boots. Only optional HMR/title-LLM/native directory-picker rows are disabled; session-query remains active. This uses loopback HTTP, not external provider/MCP calls; no visual browser, actual browser client RPC execution or in-flight HTTP cancellation acceptance is claimed.
 
+## Host-row ownership drift: `web_fetch` and the plan-mode text (0.6.3)
+
+A declarative preset row is a **definition**, not a patch. In web mode `dsh-web-app` disables 24 host
+rows so each agent preset can mount its own (tools, planning, compaction, delegation); anything the
+preset does not compose is simply absent, and any value it states is the effective one. The 0.2.0 port
+rebuilt the agent plane row by row and kept the 0.5.3 values verbatim, which is faithful in text but
+not in behavior:
+
+- `tool-web: { fetch: false }` (public commit `5fe21f6`, "preserving existing behavior") was **inert**
+  on 0.1.x: the host plane's own `fetch:true` row won there, and production ran with `web_fetch` —
+  measured 18 → 2 `web_search` calls per librarian research run. On 0.2.0 the same declaration became
+  effective, so every 0.6.0-0.6.2 preset session in web mode silently lost `web_fetch`. The 0.5.3 T0
+  had asserted `fetch: false` as if it were intent, so the stale value was locked in twice.
+- `plan-mode` carried a frozen copy of the host's prompt. The host rewrote a sentence of it after
+  0.5.3 ("keep the tool catalog unchanged" → "keep the request shape stable"), which a copy can never
+  follow.
+
+Corrections:
+
+- `tool-web` declares `fetch: true` (the effective 0.5.3 behavior, and the host fetcher ships SSRF
+  protection).
+- `plan-mode` inherits the host's current text: `parsePlanSection` reads the `section` block scalar
+  out of the installed `@deepseek-ai/dsh-base/cordis.patch.yml` (YAML clip semantics, byte-identical
+  to the host loader's own parse) and the mounted definition uses it. The shipped string is only the
+  baseline for hosts whose base patch cannot be read, and that path warns.
+
+Guards added, because neither the port review nor the then-current tests compared *effective* values:
+
+- `scripts/audit-host-rows.mjs` (run by `scripts/t0-validate.mjs` whenever a reference host is
+  installed) compares every preset row that shares an id with the host's base bundle. Rules: a shared
+  row may differ only if listed in `DIVERGENCES` with a reason; a row `dsh-web-app` hands to the
+  agent plane (base enables it, web disables it) must be composed or listed in `ABSENCES`; the
+  inherited plan-mode text must equal the host's own parse; stale allowlist entries fail. Two
+  negative tests keep the guard honest (a contradicted `tool-web` value and a host that stops
+  shipping the block form both fail).
+- `scripts/t0-validate.mjs` pins the two intent values without needing a host.
+- `test/web-host-smoke.cjs` now composes bundles like a real profile (dsh-base, then dsh-web-app,
+  then this package, empty profile root). The earlier shape wrote the base rows into the profile
+  root, where they outrank every bundle patch — so dsh-web-app's `disabled: true` entries never
+  landed, the host's `tool-web` row stayed active with `fetch:true`, and the plane split was not
+  exercised. The smoke asserts the host row stays off and that the preset's row yields both
+  `web_search` and `web_fetch` (visibility read with `tools.get(name, scope)`, the host's own
+  read; `view()` lists only agent-session-restrictable tools and stays empty here). Verified in both
+  directions: `fetch:true` passes, `fetch:false` fails.
+
+Row inventory against DSH 0.2.0-rc.2 (24 rows the web app hands over): 15 shared ids — 14 identical
+to the host base and 1 listed divergence (`plan-mode`, inherited at mount time); 7 listed absences
+(`command-goal`, `skill-filesystem`, `tool-skill`, `tool-subagent`, `tool-subagent-fork`,
+`tool-workflow`, `workflow-ptc`); 2 host default-off (`tool-ralph`, `tool-plugin-manager`, both
+shipped disabled in the base itself).
+
 ## Verification boundaries (historical native.2 results)
 
 - The latest full suite passes 88/88 (zero skipped), including exact upstream persona, metadata, stock-tool composition, tool wording and configuration-behavior comparisons, plus client, raw archive and named-profile unit contracts.

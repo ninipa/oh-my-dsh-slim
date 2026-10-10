@@ -61,14 +61,25 @@ async function rpc(method, payload = {}) {
     // configuration directory. This also works with npm-prefix/non-ASAR hosts.
     const anchorNames = rows => { for (const row of rows) { if (row.name?.startsWith('@deepseek-ai/')) row.name = pathToFileURL(requireHost.resolve(row.name)).href; if (row.insert) anchorNames(row.insert); if (row.group && Array.isArray(row.config)) anchorNames(row.config); } };
     anchorNames(baseRows); anchorNames(webPatches);
-    const configPath = path.join(temporary, 'smoke.yml'); fs.writeFileSync(configPath, yaml.dump(baseRows, { schema }));
+    // Layer the bundles the way a real profile does: dsh-base first, then
+    // dsh-web-app, then this package, with an empty profile root. Writing the
+    // base rows INTO the root instead (the earlier shape here) put them on top of
+    // every bundle patch, so dsh-web-app's `disabled: true` entries never landed
+    // and the composition kept the host's tool-web row alive — the plane split
+    // the whole preset depends on was not actually exercised.
     const packageDir = path.resolve(__dirname, '../npm-package');
-    const fixtureBundle = path.join(temporary, 'node_modules', 'omds-web-smoke-bundle'); fs.mkdirSync(fixtureBundle, { recursive: true });
-    fs.writeFileSync(path.join(fixtureBundle, 'package.json'), JSON.stringify({ name: 'omds-web-smoke-bundle', version: '1.0.0', dsh: { bundle: { patch: ['cordis.patch.yml'] } } }));
-    fs.writeFileSync(path.join(fixtureBundle, 'cordis.patch.yml'), yaml.dump(webPatches, { schema }));
+    const writeBundle = (name, patch) => {
+      const dir = path.join(temporary, 'node_modules', name); fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, version: '1.0.0', dsh: { bundle: { patch: ['cordis.patch.yml'] } } }));
+      fs.writeFileSync(path.join(dir, 'cordis.patch.yml'), yaml.dump(patch, { schema }));
+    };
+    const BUNDLES = ['omds-base-smoke-bundle', 'omds-web-smoke-bundle', 'oh-my-dsh-slim'];
+    const configPath = path.join(temporary, 'smoke.yml'); fs.writeFileSync(configPath, yaml.dump([], { schema }));
+    writeBundle('omds-base-smoke-bundle', [{ insert: baseRows }]);
+    writeBundle('omds-web-smoke-bundle', webPatches);
     fs.cpSync(packageDir, path.join(temporary, 'node_modules', 'oh-my-dsh-slim'), { recursive: true, dereference: true });
-    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({ name: 'omds-web-smoke', private: true, dsh: { profile: { bundles: ['omds-web-smoke-bundle', 'oh-my-dsh-slim'] } } }));
-    const profileContext = { home: process.env.DSH_HOME, dir: temporary, patchPath: path.join(temporary, 'cordis.patch.yml'), installAnchor: anchor, name: 'omds-web-smoke', startedBundles: [], bundles: ['omds-web-smoke-bundle', 'oh-my-dsh-slim'], overlays: [] };
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({ name: 'omds-web-smoke', private: true, dsh: { profile: { bundles: BUNDLES } } }));
+    const profileContext = { home: process.env.DSH_HOME, dir: temporary, patchPath: path.join(temporary, 'cordis.patch.yml'), installAnchor: anchor, name: 'omds-web-smoke', startedBundles: [], bundles: BUNDLES, overlays: [] };
     const start = async patches => {
       ctx = await boot('omds-web-smoke', configPath, patches, root => {
         root.provide('profileContext', profileContext);
@@ -83,6 +94,37 @@ async function rpc(method, payload = {}) {
       assert.equal(ctx.get('webServer').host, '127.0.0.1');
     };
     await start(readProfilePatches('omds-web-smoke', profileContext));
+    // Effective tool catalog of the preset's own web row, mounted with the real
+    // host plugin. dsh-web-app disables the host's tool-web row in this
+    // composition, so the preset row is what the model would see: 0.6.0 through
+    // 0.6.2 shipped fetch:false here and silently lost web_fetch, which no
+    // static check caught. Assert the outcome, not the value.
+    {
+      const presetModule = await import(pathToFileURL(path.join(packageDir, 'preset/preset.js')).href);
+      const flatten = rows => rows.flatMap(row => [row, ...(row.group && Array.isArray(row.config) ? flatten(row.config) : [])]);
+      const row = flatten(presetModule.plugins).find(entry => entry.id === 'tool-web');
+      assert.ok(row, 'the preset composes a tool-web row');
+      const toolWeb = await hostImport('@deepseek-ai/dsh-tool-web');
+      const scope = await hostImport('@deepseek-ai/dsh-scope');
+      const probe = scope.createScope(ctx, Symbol('omds-web-tool-probe'));
+      try {
+        // The plugin's own visibility read (dsh-tool-web uses the same
+        // `tools.get(name, scope)` shape for its prompt sections); view() only
+        // lists agent-session restrictable tools and stays empty here.
+        const visible = name => probe.ctx.get('tools').get(name, scope.scopeOf(probe.ctx)) !== undefined;
+        assert.ok(!visible('web_search') && !visible('web_fetch'),
+          'the host tool-web row must stay disabled in web mode, or the preset row is not the only source');
+        // The loader resolves a row's config through the plugin's own schema and
+        // supplies its injected services before apply(); mirror both so the
+        // preset's raw row config is what the probe mounts.
+        toolWeb.apply(new Proxy(probe.ctx, { get(target, key) {
+          return key === 'systemPrompt' || key === 'tools' ? target.get(key) : Reflect.get(target, key);
+        } }), toolWeb.Config(row.config ?? {}));
+        assert.ok(visible('web_search'), 'preset session exposes web_search');
+        assert.ok(visible('web_fetch'), 'preset session exposes web_fetch — the 0.6.0 tool-web fetch:false regression');
+      } finally { await probe.dispose(); }
+      console.log('WEB_TOOL_CATALOG_PASS');
+    }
     assert.equal((await request('/omds/profile-list', { body: {} })).status, 401);
     assert.equal((await request('/omds/profile-list', { body: {}, headers: { host: 'evil.invalid' } })).status, 403);
     assert.equal((await request('/omds/profile-list', { body: {}, headers: { origin: 'http://evil.invalid' } })).status, 403);

@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.6.2 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.6.3 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -55,7 +55,7 @@ reads a finished child's final message without waking it or consuming another mo
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.6.1
+oh-my-dsh-slim@0.6.3
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -65,7 +65,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.3
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules
@@ -237,7 +237,8 @@ Additional limits:
   not an upstream permission-model change.
 - `early-close-context` supplies running/reported/settled facts and delegation reminders. It
   cannot force the model to wait or guarantee model compliance.
-- `web_search` uses the host search service and may incur independent auxiliary-model charges.
+- `web_search` uses the host search service and may incur independent auxiliary-model charges;
+  `web_fetch` uses the host fetcher and costs no model call.
 - Host imports use the host loader's own module base and module instances, including packaged
   desktop resolution. The Lyrissonare discovery workaround was studied as a reference;
   **it is not a dependency** of this package.

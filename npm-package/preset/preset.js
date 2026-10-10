@@ -1,4 +1,5 @@
 // oh-my-dsh-slim — declarative agent preset targeting DSH 0.2.0-rc.2.
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { hostBaseUrl } from './bridge.js';
@@ -322,6 +323,16 @@ const roleRows = ROLE_TOOLS.map(([roleId, toolId]) => {
   return row;
 });
 
+/**
+ * Baseline plan-mode section: the 0.5.3 text, byte-identical to the upstream
+ * preset. The plan-mode plugin requires a non-empty `section` and ships no
+ * default of its own, so this text must come from the composition — and in web
+ * mode dsh-web-app disables the host's own row, which leaves ours as the only
+ * source. Freezing this copy would pin the host's prose at the moment we copied
+ * it (the host already rewrote a sentence of it after 0.1.x), so the mounted
+ * definition replaces the section with the host's current text; see
+ * hostPlanSection(). This baseline serves hosts whose base patch cannot be read.
+ */
 const PLAN_SECTION = `You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
 
 Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
@@ -507,7 +518,14 @@ export const plugins = [
   { id: 'role-mcp', name: here('role-mcp.js') },
   { id: 'tool-ask-user', name: '@deepseek-ai/dsh-tool-ask-user' },
   { id: 'tool-todo', name: '@deepseek-ai/dsh-tool-todo', config: { allowParallelInProgress: true } },
-  { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { fetch: false, searchTimeoutMs: 60000 } },
+  // The agent plane owns this row in web mode (dsh-web-app disables the host
+  // row), so this config IS the effective value. 0.5.x carried `fetch: false`
+  // there too, but the host plane's own fetch:true row won and the value was
+  // inert; the declarative port turned that dead declaration into a definition
+  // and silently dropped web_fetch (0.6.0-0.6.2). fetch stays true: the host
+  // fetcher ships SSRF protection, and its absence pushed librarians back into
+  // repeated web_search calls (measured 18 -> 2 per research run on 0.1.x).
+  { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { fetch: true, searchTimeoutMs: 60000 } },
 ];
 
 export const PRESET_ID = 'oh-my-dsh-slim';
@@ -535,6 +553,67 @@ export const patch = { insert: [{ id: 'preset-' + PRESET_ID, name: '@deepseek-ai
 export const name = 'omds-preset';
 export const inject = ['agentPresets', 'loader'];
 
+/**
+ * The `section` block scalar of the base patch's own `plan-mode` row.
+ *
+ * dsh-web-app disables the host's plan-mode row in web mode, so the preset's
+ * row is the only source of the section text, and the plugin rejects an empty
+ * one. Reading it here keeps the host as the owner of that prose: a host
+ * rewrite reaches preset sessions on the next restart instead of waiting for
+ * this package to be republished. Only the literal block form the host ships is
+ * read; anything else returns undefined and the caller keeps the baseline.
+ *
+ * @param text - the installed `@deepseek-ai/dsh-base/cordis.patch.yml`.
+ * @returns the section text under YAML clip semantics, or undefined.
+ */
+export function parsePlanSection(text) {
+  const lines = text.split('\n');
+  const rowAt = lines.findIndex((line) => line.trim() === '- id: plan-mode');
+  if (rowAt < 0) return undefined;
+  const keyAt = lines.findIndex((line, index) => index > rowAt && /^\s*section: \|\s*$/.test(line));
+  if (keyAt < 0) return undefined;
+  // Every following line more indented than the key (or blank) belongs to the
+  // value; the block ends at the next sibling key.
+  const keyIndent = lines[keyAt].search(/\S/);
+  const body = [];
+  for (let index = keyAt + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() !== '' && line.search(/\S/) <= keyIndent) break;
+    body.push(line);
+  }
+  const indents = body.filter((line) => line.trim() !== '').map((line) => line.search(/\S/));
+  const indent = indents.length === 0 ? 0 : Math.min(...indents);
+  // YAML clip semantics: trailing blank lines go, one final newline stays, so
+  // the inherited text is byte-identical to what the host's own loader sees.
+  const dedented = body.map((line) => line.slice(indent));
+  while (dedented.length > 0 && dedented[dedented.length - 1].trim() === '') dedented.pop();
+  return dedented.length === 0 ? undefined : dedented.join('\n') + '\n';
+}
+
+/**
+ * The host base bundle's own plan-mode section, read from the installed host.
+ * @param base - host loader base URL (a file URL, possibly inside app.asar).
+ * @returns the section text, or undefined when the base patch cannot be read.
+ */
+function hostPlanSection(base) {
+  try {
+    return parsePlanSection(readFileSync(createRequire(base).resolve('@deepseek-ai/dsh-base/cordis.patch.yml'), 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Replace the plan-mode section with the host's own text, when it is readable. */
+function withHostPlanSection(rows, section) {
+  return rows.map((row) => {
+    if (row.id === 'plan-mode') {
+      return section === undefined ? row : { ...row, config: { ...row.config, section } };
+    }
+    if (row.group && Array.isArray(row.config)) return { ...row, config: withHostPlanSection(row.config, section) };
+    return row;
+  });
+}
+
 /** Pin native rows to the host graph, not the external profile directory. */
 export function resolvedDefinition(ctx) {
   const base = ctx.loader?.config?.bareModuleBaseUrl ?? hostBaseUrl() ?? ctx.loader?.ctx?.baseUrl;
@@ -545,7 +624,11 @@ export function resolvedDefinition(ctx) {
     ...(row.name?.startsWith('@deepseek-ai/') ? { name: pathToFileURL(requireHost.resolve(row.name)).href } : {}),
     ...(row.group && Array.isArray(row.config) ? { config: resolveRows(row.config) } : {}),
   }));
-  return { ...definition, plugins: resolveRows(plugins) };
+  const section = hostPlanSection(base);
+  if (section === undefined) {
+    ctx.logger?.warn?.('oh-my-dsh-slim: the host base patch carries no readable plan-mode section; mounting the preset baseline text');
+  }
+  return { ...definition, plugins: withHostPlanSection(resolveRows(plugins), section) };
 }
 
 /**

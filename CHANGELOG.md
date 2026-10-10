@@ -4,6 +4,35 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.6.3] — host-row ownership: restore web_fetch, stop copying host prose
+
+The declarative port rebuilt the agent plane row by row, and one copied value
+changed meaning in the process: a preset row is a *definition*, not a patch. On
+0.1.x, `tool-web: { fetch: false }` was inert — the host plane's own `fetch:true`
+row won and production ran with `web_fetch` (measured 18 → 2 `web_search` calls
+per librarian research run). On 0.2.0 the same value became effective, so every
+0.6.x preset session silently lost `web_fetch` in web mode.
+
+- **`tool-web` declares `fetch: true`** again, restoring the effective 0.5.3
+  behavior; `web_search` is unaffected.
+- **`plan-mode` no longer ships a frozen copy of the host's prompt.** The mounted
+  definition reads the current section from the installed `dsh-base` base patch
+  (the host rewrote a sentence of it after 0.5.3); the shipped string remains
+  only as the baseline for hosts whose base patch cannot be read.
+- **New host-row audit** (`scripts/audit-host-rows.mjs`, run by T0 whenever a
+  reference host is installed): every preset row sharing an id with the host's
+  base bundle must match it unless listed with a reason; rows the host hands to
+  the agent plane must be composed or listed as a deliberate absence; the
+  inherited plan-mode text must stay byte-identical to the host's own parse.
+  T0 also pins the two intent values, so the dead 0.5.3 declaration cannot come
+  back unnoticed.
+- **The web host smoke composes bundles like a real profile** (dsh-base, then
+  dsh-web-app, then this package). The earlier shape wrote the base rows into
+  the profile root, where they outranked every bundle patch — so dsh-web-app's
+  `disabled: true` entries never landed and the plane split this preset depends
+  on was not exercised. The smoke now asserts the host's `tool-web` row stays
+  off and that the preset's row yields both `web_search` and `web_fetch`.
+
 ## [0.6.2] — plugin settings page on the DSH 0.2 desktop
 
 - The configuration card registers into the settings shell's `settings.section`

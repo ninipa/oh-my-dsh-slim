@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.6.2 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.6.3 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -46,7 +46,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.6.1
+oh-my-dsh-slim@0.6.3
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -56,7 +56,7 @@ oh-my-dsh-slim@0.6.1
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.1
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.6.3
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：
@@ -195,7 +195,7 @@ npm test
 - `sandbox-strip` 剥离固定权限子代理中的无效升级字段；合法顶层升级仍受宿主审批控制。
   这是预设 workaround，不是上游权限模型修复。
 - `early-close-context` 提供 running/reported/settled 事实与提醒，但不能强制模型等待或保证遵守。
-- `web_search` 使用宿主搜索服务，可能产生独立辅助模型费用。
+- `web_search` 使用宿主搜索服务，可能产生独立辅助模型费用；`web_fetch` 走宿主抓取器，不产生模型调用。
 - 宿主模块从 loader 自身 base 与模块实例导入，涵盖打包桌面解析。
   研究过 Lyrissonare 的 discovery workaround，但本包 **不依赖该 fork 或其包**。
 

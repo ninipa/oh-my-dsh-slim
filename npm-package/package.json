@@ -1,7 +1,7 @@
 {
   "name": "oh-my-dsh-slim",
-  "version": "0.6.2",
-  "description": "oh-my-opencode-slim-style specialist subagent delegation preset for DeepSeek Harness — declarative agent preset with orchestrator + six specialist roles, background-first delegation, JSON-driven configuration.",
+  "version": "0.6.3",
+  "description": "oh-my-opencode-slim-style specialist subagent delegation preset for DeepSeek Harness \u2014 declarative agent preset with orchestrator + six specialist roles, background-first delegation, JSON-driven configuration.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",

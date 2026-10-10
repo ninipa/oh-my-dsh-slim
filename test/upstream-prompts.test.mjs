@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { upstream as readUpstream } from './upstream-baseline.mjs';
 import yaml from 'js-yaml';
-import { plugins, definition } from '../npm-package/preset/preset.js';
+import { plugins, definition, parsePlanSection } from '../npm-package/preset/preset.js';
 import { ROLE_TABLE, composeRolePersona, patchedContext, resolveRole } from '../npm-package/preset/roles.js';
 import { roleDescription } from '../npm-package/preset/role-wording.js';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -27,14 +27,23 @@ test('preset metadata exactly matches the upstream preset declaration', () => {
 
 test('native model-facing tool composition matches upstream without optional new tools', () => {
   const isNative = entry => entry.name.startsWith('@deepseek-ai/');
+  // Persona is asserted separately (only its platform-shell suffix is added).
+  // tool-web is asserted separately too: its fetch value deliberately differs
+  // from the upstream text, see the assertion below.
+  const separatelyAsserted = new Set(['persona', 'tool-web']);
   const normalized = rows => flatten(rows).filter(isNative).map(entry => ({
     id: entry.id, name: entry.name,
     ...(entry.disabled === undefined ? {} : { disabled: entry.disabled }),
-    // Persona is checked separately: only its platform-shell suffix is added.
-    ...(entry.id === 'persona' || entry.config === undefined ? {} : { config: entry.config }),
+    ...(separatelyAsserted.has(entry.id) || entry.config === undefined ? {} : { config: entry.config }),
   })).sort((a, b) => a.id.localeCompare(b.id));
   assert.deepEqual(normalized(plugins), normalized(upstream));
-  assert.deepEqual(row('tool-web').config, { fetch: false, searchTimeoutMs: 60000 });
+  // Upstream 0.5.3 carried fetch:false, but that declaration was inert on that
+  // host: the host plane's own tool-web row (fetch:true) won, and production ran
+  // with web_fetch (measured 18 -> 2 web_search calls per librarian run). A
+  // declarative preset row is a definition, not a patch, so the same value now
+  // disables web_fetch outright in web mode. Keep the effective 0.5.3 behavior,
+  // not the dead declaration.
+  assert.deepEqual(row('tool-web').config, { fetch: true, searchTimeoutMs: 60000 });
   for (const id of ['skill-filesystem', 'tool-skill', 'command-goal', 'present', 'tool-plugin-manager', 'tool-subagent-fork']) {
     assert.equal(row(id), undefined, 'not an upstream tool: ' + id);
   }
@@ -91,6 +100,28 @@ test('user role route and persona append precede row agent options without chang
 
 test('plan-mode section preserves upstream text including its terminal newline', () => {
   assert.equal(row('plan-mode').config.section, original('planning').config[0].config.section);
+});
+
+// The shipped baseline above is what mounts only when the host base patch
+// cannot be read. On a real host the mounted definition carries the host's own
+// current text (the host rewrote this prose after 0.5.3), parsed out of the
+// base patch block scalar with YAML clip semantics.
+test('plan-mode section inheritance parses the base patch block scalar', () => {
+  const patch = [
+    '    - id: plan-mode',
+    "      name: '@deepseek-ai/dsh-plan-mode'",
+    '      config:',
+    '        section: |',
+    '              First line.',
+    '',
+    '              Second line, indented beyond the key.',
+    '',
+    '    - id: after-plan-mode',
+  ].join('\n');
+  assert.equal(parsePlanSection(patch), 'First line.\n\nSecond line, indented beyond the key.\n');
+  assert.equal(parsePlanSection('    - id: other\n      name: x\n'), undefined, 'no plan-mode row');
+  assert.equal(parsePlanSection('    - id: plan-mode\n      config:\n        section: "inline"\n'), undefined, 'only the block form is inherited');
+  assert.equal(parsePlanSection('    - id: plan-mode\n      config:\n        section: |\n'), undefined, 'empty block');
 });
 
 test('observer optional advertisement preserves original text without advertising an unmounted role', () => {
