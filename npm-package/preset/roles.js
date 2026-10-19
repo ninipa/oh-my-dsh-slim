@@ -93,6 +93,41 @@ export const ROLE_TABLE = Object.freeze({
     title: 'observer',
     description: "Visual analysis. Use for interpreting images, screenshots, and diagrams - extracts structured observations without loading raw files into main context. Requires a vision-capable model.",
   }),
+  'councillor-alpha': Object.freeze({
+    roleId: 'councillor-alpha',
+    toolName: 'subagent_councillor_alpha',
+    title: 'councillor-alpha',
+    seatName: 'alpha',
+    // Permission ceiling: the user may narrow this list but never widen it.
+    // role-composition normalizes it against the child's restrictableNames.
+    fixedAllow: Object.freeze(['read', 'glob', 'grep']),
+    description: "Read-only council seat alpha. Independently analyses the same question for a multi-model council; cannot write files, run shell commands, browse the network, or delegate.",
+  }),
+  'councillor-beta': Object.freeze({
+    roleId: 'councillor-beta',
+    toolName: 'subagent_councillor_beta',
+    title: 'councillor-beta',
+    seatName: 'beta',
+    fixedAllow: Object.freeze(['read', 'glob', 'grep']),
+    description: "Read-only council seat beta. Independently analyses the same question for a multi-model council; cannot write files, run shell commands, browse the network, or delegate.",
+  }),
+  'councillor-gamma': Object.freeze({
+    roleId: 'councillor-gamma',
+    toolName: 'subagent_councillor_gamma',
+    title: 'councillor-gamma',
+    seatName: 'gamma',
+    fixedAllow: Object.freeze(['read', 'glob', 'grep']),
+    description: "Read-only council seat gamma. Independently analyses the same question for a multi-model council; cannot write files, run shell commands, browse the network, or delegate.",
+  }),
+  council: Object.freeze({
+    roleId: 'council',
+    toolName: 'subagent_council',
+    title: 'council',
+    seatName: 'council',
+    // Tool-less by construction: any user tools/deny configuration is ignored.
+    synthesisOnly: true,
+    description: "Council synthesizer. Receives the original question and the raw councillor replies and produces one structured council report. It has no tools and does not dispatch councillors.",
+  }),
 });
 
 /** Every role id, in table order. */
@@ -116,6 +151,47 @@ export function advertisedRoles() {
 
 export function roleIds() {
   return Object.keys(ROLE_TABLE);
+}
+
+/**
+ * The one tool filter every path must use: `resolveRole` for the delegation
+ * request and `role-composition` for the child's scope. Two separate
+ * implementations would eventually diverge, and the diverging path would be a
+ * permission boundary.
+ *
+ * Precedence: a synthesis-only role is always `{ allow: [] }`; a role with a
+ * `fixedAllow` ceiling can only be narrowed by the user's `tools` list and the
+ * row `definition.allow` (intersection), never widened; other roles keep the
+ * historical behavior (user `tools` replaces, row allow is the fallback).
+ * `deny` is the union of row and user lists and always wins.
+ *
+ * @param roleId - a ROLE_TABLE key.
+ * @param roleConfig - one merged role entry from the effective configuration.
+ * @param definition - the row's `definition` block (optional).
+ * @returns { allow?, deny? }, or undefined when the role is unrestricted.
+ */
+export function effectiveRoleFilter(roleId, roleConfig = {}, definition = {}) {
+  const row = ROLE_TABLE[roleId] ?? {};
+  if (row.synthesisOnly === true) return { allow: [] };
+  const arrayOf = (value) => (Array.isArray(value) && value.length > 0 ? value : undefined);
+  const userAllow = arrayOf(roleConfig.tools);
+  const rowAllow = arrayOf(definition.allow);
+  let allow;
+  if (Array.isArray(row.fixedAllow)) {
+    allow = row.fixedAllow.filter((name) =>
+      (userAllow === undefined || userAllow.includes(name)) && (rowAllow === undefined || rowAllow.includes(name)));
+  } else {
+    allow = userAllow ?? rowAllow;
+  }
+  const deny = [...new Set([
+    ...(Array.isArray(definition.deny) ? definition.deny : []),
+    ...(Array.isArray(roleConfig.deny) ? roleConfig.deny : []),
+  ])];
+  if (allow === undefined && deny.length === 0) return undefined;
+  return {
+    ...(allow === undefined ? {} : { allow: [...allow] }),
+    ...(deny.length === 0 ? {} : { deny }),
+  };
 }
 
 function text(value) {
@@ -316,12 +392,7 @@ export function resolveRole(config, ctx) {
   const maxTokens = roleConfig.maxTokens ?? config.agentOptions?.maxTokens;
   if (typeof maxTokens === 'number') agentOptions.maxTokens = maxTokens;
   const persona = composeRolePersona(row.roleId, definition.persona, roleConfig.personaAppend, config.persona);
-  const allow = Array.isArray(roleConfig.tools) && roleConfig.tools.length > 0 ? roleConfig.tools : definition.allow;
-  const deny = [...new Set([
-    ...(Array.isArray(definition.deny) ? definition.deny : []),
-    ...(Array.isArray(roleConfig.deny) ? roleConfig.deny : []),
-  ])];
-  const toolFilter = allow === undefined && deny.length === 0 ? undefined : { ...(allow === undefined ? {} : { allow }), ...(deny.length === 0 ? {} : { deny }) };
+  const toolFilter = effectiveRoleFilter(row.roleId, roleConfig, definition);
   const toolName = text(definition.toolName) ? definition.toolName : row.toolName;
   return {
     row,
@@ -492,7 +563,13 @@ export function createRolePlugin(rawConfig) {
         });
       }
       if (!seen.patched) {
-        ctx.logger?.warn?.('oh-my-dsh-slim: the host did not register "' + role.toolName + '"; the role tool keeps the host description');
+        // Fail closed. The label prefix this wrapper writes before delegating is
+        // the ONLY runtime signal role-composition has to identify a child; a
+        // tool that registered through a path the wrapper could not intercept
+        // would create children with no label, which role-composition must then
+        // skip — and a skipped child runs with the parent's full tool surface.
+        // Refusing to mount the role tool is the only safe outcome.
+        throw new Error('oh-my-dsh-slim: the host did not register "' + role.toolName + '" through the intercepted path; refusing to mount an unlabelled role tool (a child created by it would bypass the role restriction)');
       }
     },
   };

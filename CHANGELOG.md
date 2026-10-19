@@ -4,6 +4,61 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.0] — Council: multi-model seats and a tool-less synthesizer
+
+omo-s Council arrives as a fixed three-seat roster plus one synthesis-only
+agent. It is configuration-driven and off by default; a council is active only
+when at least two seats are enabled.
+
+- **Seats are read-only by construction.** `councillor-alpha/beta/gamma` run
+  with a `read`/`glob`/`grep` allow list pinned in `ROLE_TABLE`; a user may
+  narrow it but never add `bash`, writes, network access or delegation.
+- **The synthesizer has no user switch.** `council` mounts only when two or
+  more seats are enabled, and its `synthesisOnly` role always compiles to
+  `tools.restrict({ allow: [] })`. A stale tool cannot turn it into a
+  tool-bearing child.
+- **Council Mode is a dynamic section.** `council-mode.js` injects the
+  dispatch-and-synthesis procedure for the top-level agent only, and only while
+  at least two seat tools plus the synthesizer tool are actually mounted.
+- **Personas adapt omo-s 2.2.18** (`COUNCILLOR_PROMPT` / `COUNCIL_AGENT_PROMPT`)
+  to DSH tools; the report shape (Council Response / Per-Councillor Details /
+  Council Summary with a consensus level) is preserved.
+- **Config surface.** The settings card gains a Council group; the synthesizer
+  row has no enable switch; each seat carries an appended prompt
+  (`advanced.roles.<role>.personaAppend`). Council roles reject `mcps`, because
+  MCP tools are appended to the assembly outside `tools.restrict`.
+- **Security and compatibility fixes in the same release.** A role disabled
+  mid-session no longer skips its child composition (a stale tool used to be
+  able to create an unrestricted child); role persona sections render with
+  `interpolate: false`, so a user `{{variable}}` can no longer abort a
+  strict-interpolation host turn (it is rejected at validation instead); named
+  profiles now pass the profile id into `role-composition`, so seat filters and
+  prompts apply under a custom profile; the card inherits missing roles from
+  the shipped base, so upgrading cannot silently enable a role added by a
+  release.
+- **Verification.** New `test/council-config.test.mjs`,
+  `test/council-security.test.mjs`, `test/council-mode.test.mjs`,
+  `test/council-smoke.cjs` and `test/council-resume-smoke.cjs`; upstream parity
+  tests are scoped to the six upstream roles. Base/web host smokes and the
+  cold-resume smoke pass on 0.2.0-rc.2 and 0.2.1-rc.2.
+- **Fail closed when a role tool is not intercepted.** If the host registers a
+  role tool through a path the wrapper cannot patch, the row now refuses to
+  mount instead of keeping an unlabelled tool; a child created by that tool
+  would have no role id and would skip the read-only composition.
+- **Default-path model warning.** The card warns when council seats inherit the
+  session model (the shipped default), not only when explicit routes are
+  identical; the README states the same trap.
+- **Council Mode wording.** The orchestrator is told to let the seats read the
+  code instead of pre-dispatching explorer lanes, and to present the synthesizer
+  report verbatim (sections, consensus level and per-seat details intact).
+- **Visible diagnostics.** A council that is configured active but unusable
+  (missing seat or synthesizer tool, invalid config) is logged once per reason
+  instead of looking identical to "not enabled".
+- **More zero-model coverage.** `test/real-role-row-smoke.cjs` mounts the
+  production role row, calls its tool, and asserts the wrapper label, the seat
+  persona and the exact read/glob/grep ceiling; the suite is 138/138 and all
+  six host smokes pass on both 0.2.0-rc.2 and 0.2.1-rc.2.
+
 ## [0.7.0] — DSH 0.2.1: role carrying moves into the child scope
 
 DSH 0.2.1 removed `persona`/`toolFilter` from `dsh-tool-subagent`'s config and

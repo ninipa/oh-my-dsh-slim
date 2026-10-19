@@ -3,11 +3,24 @@
 // most 20 seconds and remains failure-open, as in the 0.1.x preset.
 import { hostImport } from './bridge.js';
 import { loadConfig, bindProfileContext } from './config.js';
-import { roleIdForAgent } from './roles.js';
+import { ROLE_TABLE, roleIdForAgent } from './roles.js';
 
 export const name = 'omds-role-mcp';
 export const inject = ['loader', 'agents', 'tools'];
 export const MCP_WAIT_TIMEOUT_MS = 20000;
+
+/**
+ * Whether a role may mount MCP tools. Council seats are read-only and the
+ * synthesizer is tool-less; MCP tools are appended to the assembly by this
+ * module outside tools.restrict, so mounting them for a council role would
+ * bypass that boundary. Config validation rejects a non-empty mcps list too.
+ * @param roleId - a role id from the session descriptor.
+ */
+export function roleSupportsMcp(roleId) {
+  const row = ROLE_TABLE[roleId];
+  return row?.synthesisOnly !== true && !Array.isArray(row?.fixedAllow);
+}
+
 export function serverConfig(serverName, server) {
   return { ...server, serverName };
 }
@@ -71,8 +84,14 @@ export async function apply(ctx, config = {}) {
     }
     if (!belongs(agent) || !isContinuableAgent(agent)) return;
     const loaded = loadConfig(ctx);
-    const role = loaded.roles[roleIdForAgent(agent)];
+    const roleId = roleIdForAgent(agent);
+    const role = loaded.roles[roleId];
     if (!role || role.enabled === false) return;
+    // Council seats are read-only and the synthesizer is tool-less. MCP tools
+    // are appended to the assembly outside tools.restrict, so mounting them for
+    // a council role would bypass that boundary. Config validation rejects a
+    // non-empty mcps list too; this is the defense-in-depth half.
+    if (!roleSupportsMcp(roleId)) return;
     const names = [...new Set(role.mcps ?? [])].filter((id) => loaded.servers[id] !== undefined);
     if (!names.length) return;
     const entry = { fibers: [], stopped: false, waited: false, ready: undefined };

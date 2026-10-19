@@ -25,7 +25,7 @@ import { hostImport } from './bridge.js';
 import { loadConfig, bindProfileContext } from './config.js';
 import { ROLE_PERSONAS } from './preset.js';
 import {
-  ROLE_TABLE, composeRolePersona, fitFilterToKnown, isSubagent, roleIdForAgent,
+  ROLE_TABLE, composeRolePersona, effectiveRoleFilter, fitFilterToKnown, isSubagent, roleIdForAgent,
 } from './roles.js';
 
 export const name = 'omds-role-composition';
@@ -36,21 +36,15 @@ const applied = new WeakSet();
 
 /**
  * The section/tool-filter a role's child should receive, derived from the same
- * user configuration `resolveRole()` uses. Rows do not ship `allow`/`deny`
- * facts of their own (`preset.js` roleRow carries only the id and persona), so
- * the filter is exactly the per-role configuration: `tools` is an allow-list,
- * `deny` a deny-list.
+ * user configuration `resolveRole()` uses. Kept as a thin wrapper around
+ * `effectiveRoleFilter` so both paths can never disagree on the boundary.
+ * @param roleId - the role id whose child is being composed.
  * @param roleConfig - one role entry from the merged configuration.
+ * @param definition - the row's `definition` block, when available.
  * @returns a tool filter, or undefined when the role is unrestricted.
  */
-export function roleFilter(roleConfig = {}) {
-  const allow = Array.isArray(roleConfig.tools) && roleConfig.tools.length > 0 ? roleConfig.tools : undefined;
-  const deny = Array.isArray(roleConfig.deny) ? roleConfig.deny : [];
-  if (allow === undefined && deny.length === 0) return undefined;
-  return {
-    ...(allow === undefined ? {} : { allow: [...allow] }),
-    ...(deny.length === 0 ? {} : { deny: [...new Set(deny)] }),
-  };
+export function roleFilter(roleId, roleConfig = {}, definition = {}) {
+  return effectiveRoleFilter(roleId, roleConfig, definition);
 }
 
 /**
@@ -66,7 +60,10 @@ export async function composeChild(agent, ctx, scopeOf) {
   if (roleId === undefined || ROLE_TABLE[roleId] === undefined) return 'skipped';
   const preset = loadConfig(ctx);
   const roleConfig = preset.roles[roleId] ?? {};
-  if (roleConfig.enabled === false) return 'skipped';
+  // `enabled` gates whether the delegation TOOL is mounted, not what an
+  // already-mounted tool may create. A session that still holds a tool from an
+  // older generation (the user disabled the role mid-session) must not produce
+  // an unconstrained child: skipping here was a fail-open permission hole.
   applied.add(agent);
 
   const section = composeRolePersona(roleId, ROLE_PERSONAS[roleId], roleConfig.personaAppend, undefined);
@@ -74,6 +71,10 @@ export async function composeChild(agent, ctx, scopeOf) {
     agent.ctx.systemPrompt.section({
       name: 'deployment:persona-prefix',
       order: agent.ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
+      // The composed persona is literal text (user personaAppend included);
+      // interpolating it would make an unknown {{var}} abort the child turn on
+      // a strict-interpolation host.
+      interpolate: false,
       text: section,
     });
   } catch (error) {
@@ -81,7 +82,7 @@ export async function composeChild(agent, ctx, scopeOf) {
     ctx.logger?.warn?.('oh-my-dsh-slim: role "%s": persona section failed: %s', roleId, String(error?.message ?? error));
   }
 
-  const filter = roleFilter(roleConfig);
+  const filter = roleFilter(roleId, roleConfig);
   if (filter === undefined) return 'ok';
   const tools = agent.ctx.get?.('tools') ?? agent.ctx.tools;
   const known = tools?.view?.(scopeOf(agent.ctx))?.restrictableNames;

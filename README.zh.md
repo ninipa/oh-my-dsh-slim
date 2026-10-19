@@ -1,15 +1,15 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.7.0 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.0 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
 **orchestrator + 5 个启用的专职角色**，交付为从插件组合包挂载的**声明式原生 agent 预设**，
 不是独立应用，也不需要手工复制预设目录。
 
-> **宿主范围：`>=0.2.0-rc.2 <0.3.0-0`；实测宿主：DSH 0.2.0-rc.2。**
-> 门禁按 npm 范围语义执行：0.2.0 的后续预发布（rc.3）与 0.2.x 稳定版允许安装但不宣称实测；
-> 更高补丁版本的预发布（例如当前宿主 `alpha` 标签的 `0.2.1-alpha.2`）会被拒绝，直到有版本明确允许。
+> **宿主范围：`>=0.2.0-rc.2 <0.3.0-0`；实测宿主：DSH 0.2.0-rc.2 与 0.2.1-rc.2。**
+> 门禁是 per-core 白名单：0.2.0 与 0.2.1 的预发布/稳定/后续补丁放行；更高 minor 或更高补丁的
+> 预发布 core（例如 `0.2.2-rc.1`）会被拒绝，直到有版本明确放行。
 > 升级策略：所需 API 不变时维持 0.2 版本线兼容，验证新宿主后才宣称实测支持；0.3 版本线另行审查。
 > **DSH ≤0.1.5 请继续使用 `oh-my-dsh-slim@0.5.3`。** 中间版本需要升级 DSH。
 > 0.6.1 已通过 101 项自动测试、六项隔离已安装宿主基础组合 smoke，以及 web 组合传输层五项哨兵
@@ -41,12 +41,37 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 **reported 不等于 settled**；正式结束通知后再整合。`subagent_result` 只读已结束子代理最终消息，
 不唤醒子代理、不消耗额外模型回合。
 
+## Council 议会（0.8.0）
+
+三个只读议员席位加一个零工具合成器：把同一个问题交给多个模型独立分析，再合成一份带共识等级的
+报告。默认全部关闭；**至少启用 2 个议员才算 Council**，只开 1 个时该席位是普通只读委派。
+
+| 角色 | 工具 | 权限 | 默认 |
+|---|---|---|---|
+| councillor-alpha / beta / gamma | subagent_councillor_alpha / … | 只读（read/glob/grep，固定上限，只能收窄） | 关闭 |
+| council | subagent_council | 零工具（合成专用） | 随席位派生 |
+
+- 在设置卡片的 Council 分组里给每个议员选 provider/model/思考强度；建议三席使用不同模型。
+- **未配置 provider/model 的席位继承当前会话模型**；如果所有席位都继承，议会只是同一模型的重复采样，卡片会给出提示。
+- 合成器没有独立开关：≥2 席启用时自动挂载；席位全关时整个 Council 不出现（工具与提示段都没有）。
+- 席位与合成器都不能使用 MCP（配置会拒绝 `mcps`），外部资料由主代理先抓取后放进问题里。
+- 席位提示词可在席位的“高级”里追加（`personaAppend`）；提示词按字面量渲染，不要写 `{{变量}}`。
+- 用法：在新会话里明确说“用 council 评估 …”或“让几个模型分别看 …”。编排模型会在同一条消息里
+  并行派发、等全部席位返回后再调用合成器；普通问题不会自动触发，成本敏感时可直接说“不要用 council”。
+- 成本：一次 Council 至少 4 个模型会话（3 议员 + 1 合成），是系统里最贵的路径，按需使用。
+- 限制：固定 3 席；不支持任意席位数与模型 fallback 链；没有 `@council` 提及路由（用自然语言）。
+  Council 段只注入顶层会话；冷恢复后的席位仍保持只读。
+- 排障：如果卡片显示 Council 已启用但新会话里没有 `subagent_councillor_*` / `subagent_council`，先确认是新会话；
+  宿主日志里的 `omds-council-mode` 警告会说明是席位工具还是合成器没有挂上。
+- 其它已知边界：一次 Council 占用 3 席 + 1 合成器，与其它后台 lane 共享宿主 `maxActiveSubagents`（默认 8）；
+  没有代码级超时或 kill-switch，卡住时需自行中止；per-seat MCP 是**有意禁止**（MCP 会绕过 `tools.restrict`）。
+
 ## 安装已发布版本（随后重启）
 
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.7.0
+oh-my-dsh-slim@0.8.0
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -56,7 +81,7 @@ oh-my-dsh-slim@0.7.0
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.7.0
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.0
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：

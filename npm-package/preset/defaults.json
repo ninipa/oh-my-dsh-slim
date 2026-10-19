@@ -116,6 +116,37 @@
           "ask_user_question"
         ],
         "mcps": []
+      },
+      "councillor-alpha": {
+        "enabled": false,
+        "tools": [
+          "read",
+          "glob",
+          "grep"
+        ],
+        "mcps": []
+      },
+      "councillor-beta": {
+        "enabled": false,
+        "tools": [
+          "read",
+          "glob",
+          "grep"
+        ],
+        "mcps": []
+      },
+      "councillor-gamma": {
+        "enabled": false,
+        "tools": [
+          "read",
+          "glob",
+          "grep"
+        ],
+        "mcps": []
+      },
+      "council": {
+        "enabled": false,
+        "mcps": []
       }
     }
   },

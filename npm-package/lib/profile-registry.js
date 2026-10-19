@@ -27,7 +27,7 @@ export const revisionForConfig = config => createHash('sha256').update(JSON.stri
 export const profileError = (code, message) => Object.assign(new Error(message), { code });
 export function namedDefinition(ctx, id, record) {
   const definition = resolvedDefinition(ctx);
-  const consumers = new Set(['roles.js', 'role-mcp.js', 'subagent-roles.js']);
+  const consumers = new Set(['roles.js', 'role-mcp.js', 'subagent-roles.js', 'role-composition.js', 'council-mode.js']);
   const transform = rows => rows.map(row => ({ ...row,
     ...(consumers.has(row.name?.split('/').at(-1)) ? { config: { ...row.config, profileId: id } } : {}),
     ...(row.group && Array.isArray(row.config) ? { config: transform(row.config) } : {}),

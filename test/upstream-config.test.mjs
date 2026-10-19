@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'no
 import { dirname, join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, validateConfigDocument, EFFORT_LEVELS } from '../npm-package/preset/config.js';
+import { loadConfig, validateConfigDocument, EFFORT_LEVELS, UPSTREAM_ROLE_IDS } from '../npm-package/preset/config.js';
 import { apply as applyRequests } from '../npm-package/preset/subagent-roles.js';
 import { latestOwnAssistant } from '../npm-package/preset/subagent-result.js';
 import { escalationArgsAreDoomed, stripEscalationArgs, isDelegatedChild } from '../npm-package/preset/sandbox-strip.js';
@@ -26,6 +26,11 @@ function fixture(t) {
   return { dir, original, save: doc => writeFileSync(file, JSON.stringify(doc)) };
 }
 
+// The 0.5.3 baseline only knows the six upstream roles. Council is an
+// intentional 0.8.0 addition, so parity is asserted on the upstream face and
+// the council family gets its own assertions below.
+const upstreamFace = (config) => ({ ...config, roles: Object.fromEntries(UPSTREAM_ROLE_IDS.map(id => [id, config.roles[id]])) });
+
 for (const [label, doc] of [
   ['factory defaults', {}],
   ['compact overrides and deny union', { roles: { oracle: { model: 'custom', deny: ['bash'], tools: [] } }, advanced: { roles: { oracle: { deny: ['read'], temperature: 0.8, personaAppend: 'append' } } } }],
@@ -35,12 +40,28 @@ for (const [label, doc] of [
   ['observer force disabled', { roles: { observer: { enabled: true } } }],
 ]) test('upstream config parity: ' + label, t => {
   const f = fixture(t); f.save(doc);
-  assert.deepEqual(loadConfig(), f.original.loadConfig());
+  assert.deepEqual(upstreamFace(loadConfig()), upstreamFace(f.original.loadConfig()));
   assert.deepEqual(EFFORT_LEVELS, f.original.EFFORT_LEVELS);
 });
 
-test('bundled default document is byte-for-byte upstream JSON behavior', () => {
-  assert.deepEqual(JSON.parse(readFileSync(new URL('../npm-package/preset/defaults.json', import.meta.url), 'utf8')), defaultDocument);
+test('bundled defaults keep the upstream preset byte-for-byte and add the council family', () => {
+  const bundled = JSON.parse(readFileSync(new URL('../npm-package/preset/defaults.json', import.meta.url), 'utf8'));
+  const bundledPreset = bundled.presets['my-dsh-normal'];
+  const upstreamPreset = defaultDocument.presets['my-dsh-normal'];
+  assert.deepEqual({
+    ...bundled,
+    presets: { ...bundled.presets, 'my-dsh-normal': Object.fromEntries(Object.keys(upstreamPreset).map(key => [key, bundledPreset[key]])) },
+  }, defaultDocument, 'every upstream key stays identical');
+  for (const roleId of ['councillor-alpha', 'councillor-beta', 'councillor-gamma']) {
+    assert.equal(bundledPreset[roleId].enabled, false, roleId + ': disabled by default');
+    assert.deepEqual(bundledPreset[roleId].tools, ['read', 'glob', 'grep'], roleId + ': read-only allow list');
+    assert.deepEqual(bundledPreset[roleId].mcps, [], roleId + ': no MCP servers');
+    assert.equal(bundledPreset[roleId].provider, undefined, roleId + ': model inherited, not pinned');
+    assert.equal(bundledPreset[roleId].model, undefined, roleId + ': model inherited, not pinned');
+  }
+  assert.equal(bundledPreset.council.enabled, false, 'synthesizer defaults off (derived from seats)');
+  assert.deepEqual(bundledPreset.council.mcps, [], 'synthesizer has no MCP servers');
+  assert.equal(bundledPreset.council.tools, undefined, 'synthesizer declares no user tool list');
 });
 
 test('unknown named presets fail load and validation just like upstream', t => {

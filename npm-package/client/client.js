@@ -33,7 +33,21 @@ window.__ModuleLoader__.load({
     });
 
     const NS = 'oh-my-dsh-slim';
-    const ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
+    const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
+    const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
+    // Council's synthesizer has no user-facing enable switch: it is active
+    // exactly when at least two councillors are. Never persist its enabled bit.
+    const COUNCIL_ROLE_ID = 'council';
+    const COUNCIL_ROLE_IDS = [...COUNCILLOR_ROLE_IDS, COUNCIL_ROLE_ID];
+    const MIN_COUNCIL_SEATS = 2;
+    const ROLE_IDS = [...UPSTREAM_ROLE_IDS, ...COUNCILLOR_ROLE_IDS, COUNCIL_ROLE_ID];
+    const DERIVED_ENABLED_ROLES = new Set([COUNCIL_ROLE_ID]);
+    const COUNCIL_DESC_KEYS = {
+      'councillor-alpha': 'roleCouncillorAlpha',
+      'councillor-beta': 'roleCouncillorBeta',
+      'councillor-gamma': 'roleCouncillorGamma',
+      council: 'roleCouncil',
+    };
     const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'max'];
 
     // Reasoning-effort selection is MODEL-scoped: the host model catalog
@@ -91,6 +105,38 @@ window.__ModuleLoader__.load({
     // base) and on the advanced layer (user-only; no shipped default).
     const PRESET_FIELDS = ['enabled', 'provider', 'model', 'effort'];
     const ADVANCED_FIELDS = ['maxTokens', 'temperature'];
+    // String-valued advanced fields (no numeric parsing, no shipped base).
+    const ADVANCED_TEXT_FIELDS = ['personaAppend'];
+    const PERSONA_APPEND_MAX = 8000;
+    // The host rejects these too; the card must not stage them in the first place.
+    const personaAppendInvalid = (value) =>
+      typeof value === 'string' && (value.length > PERSONA_APPEND_MAX || value.includes('{{'));
+
+    /**
+     * Warning keys for the Council group, derived from the draft.
+     * - one seat: needs a second seat to be a council at all;
+     * - >= 2 seats with an inherited route: the seats fall back to the
+     *   session's model, so the council may be a repeat sample (this is the
+     *   default path — no provider/model is shipped — and the explicit-route
+     *   comparison alone used to stay silent about it);
+     * - >= 2 seats, all explicit and identical: same repeat-sample warning.
+     */
+    function councilWarningKeys(draft) {
+      const seats = COUNCILLOR_ROLE_IDS.filter((roleId) => {
+        const role = draft.roles?.[roleId];
+        return role !== undefined && role.enabled !== false;
+      });
+      const keys = [];
+      if (seats.length === 1) keys.push('councilNeedsSeats');
+      if (seats.length >= MIN_COUNCIL_SEATS) {
+        const inherited = seats.filter((roleId) => !draft.roles[roleId].provider || !draft.roles[roleId].model);
+        if (inherited.length > 0) keys.push('councilInheritedModels');
+        else if (new Set(seats.map((roleId) => `${draft.roles[roleId].provider}/${draft.roles[roleId].model}`)).size === 1) {
+          keys.push('councilSameModel');
+        }
+      }
+      return keys;
+    }
 
     // Profile management lives behind the /omds RPC (registered by the seeder
     // host half). The card never writes a native preset directory itself — no
@@ -169,6 +215,21 @@ window.__ModuleLoader__.load({
       roleExplorer: '代码库扫描与调研（只读）',
       roleLibrarian: '外部文档检索（context7 / gh_grep）',
       roleObserver: '视觉分析（本版锁定）',
+      roleCouncillorAlpha: '议会席位 α（只读评审）',
+      roleCouncillorBeta: '议会席位 β（只读评审）',
+      roleCouncillorGamma: '议会席位 γ（只读评审）',
+      roleCouncil: '议会合成器（无工具，汇总各席位）',
+      councilGroup: 'Council 议会',
+      councilOn: '已启用：{seats}',
+      councilOff: '未启用（至少需要 2 个议员）',
+      councilAutoOn: '随席位自动启用',
+      councilAutoOff: '需要至少 2 个议员',
+      councilNeedsSeats: 'Council 需要至少 2 个议员；只开 1 个时该席位作为普通只读委派使用。',
+      councilInheritedModels: '有席位未配置模型，将继承当前会话模型；若全部继承，议会只是同一模型的重复采样。',
+      councilSameModel: '建议为议员选择不同模型：相同模型的“议会”只是重复采样。',
+      personaAppend: '席位提示词（追加）',
+      personaAppendHint: '例如：特别关注并发与失败恢复。',
+      personaAppendInvalid: '提示词不能包含 {{...}}，且不超过 8000 字符。',
       profile: '委派配置',
       bundledProfile: '极简角色委派',
       newProfile: '新建配置',
@@ -235,6 +296,21 @@ window.__ModuleLoader__.load({
       roleExplorer: 'Codebase scan and research (read-only)',
       roleLibrarian: 'External docs (context7 / gh_grep)',
       roleObserver: 'Vision analysis (locked this release)',
+      roleCouncillorAlpha: 'Council seat alpha (read-only review)',
+      roleCouncillorBeta: 'Council seat beta (read-only review)',
+      roleCouncillorGamma: 'Council seat gamma (read-only review)',
+      roleCouncil: 'Council synthesizer (no tools, merges the seats)',
+      councilGroup: 'Council',
+      councilOn: 'Active: {seats}',
+      councilOff: 'Off (needs at least 2 seats)',
+      councilAutoOn: 'Auto-enabled by the seats',
+      councilAutoOff: 'Needs at least 2 seats',
+      councilNeedsSeats: 'A council needs at least 2 seats; a single enabled seat runs as an ordinary read-only delegation.',
+      councilInheritedModels: 'Some seats inherit the session model (no provider/model set); if every seat inherits, the council becomes a repeat sample of one model.',
+      councilSameModel: 'Give the seats different models: identical models make the council a repeat sample.',
+      personaAppend: 'Seat prompt (appended)',
+      personaAppendHint: 'e.g. Focus on concurrency and failure recovery.',
+      personaAppendInvalid: 'Prompt must not contain {{...}} and must stay under 8000 characters.',
       profile: 'Delegation configuration',
       bundledProfile: 'Minimal Role Delegation',
       newProfile: 'New configuration',
@@ -293,20 +369,30 @@ window.__ModuleLoader__.load({
       return Number.isFinite(n) && n >= 0 && n <= 2 ? n : null;
     }
 
-    /** Effective role face the card edits, from the resolved namespace value. */
-    function buildDraft(value, advanced) {
-      const presetName = value?.preset ?? 'my-dsh-slim-default';
+    /**
+     * Effective role face the card edits, from the resolved namespace value.
+     *
+     * `base` (the shipped/factory document) fills fields the user's document
+     * does not carry. Without that fallback a role added in a later release
+     * renders as `enabled: true` for every existing settings document, and the
+     * first unrelated save writes that bit — silently enabling the new role.
+     */
+    function buildDraft(value, advanced, base) {
+      const presetName = value?.preset ?? base?.preset ?? 'my-dsh-slim-default';
+      const basePreset = base?.presets?.[presetName] ?? {};
       const roles = {};
       for (const roleId of ROLE_IDS) {
         const presetRole = value?.presets?.[presetName]?.[roleId] ?? {};
-        const adv = advanced?.roles?.[roleId] ?? {};
+        const baseRole = basePreset[roleId] ?? {};
+        const adv = advanced?.roles?.[roleId] ?? base?.advanced?.roles?.[roleId] ?? {};
         roles[roleId] = {
-          enabled: presetRole.enabled ?? true,
-          provider: presetRole.provider,
-          model: presetRole.model,
-          effort: presetRole.effort,
+          enabled: presetRole.enabled ?? baseRole.enabled ?? true,
+          provider: presetRole.provider ?? baseRole.provider,
+          model: presetRole.model ?? baseRole.model,
+          effort: presetRole.effort ?? baseRole.effort,
           maxTokens: adv.maxTokens,
           temperature: adv.temperature,
+          personaAppend: adv.personaAppend,
         };
       }
       return { preset: presetName, roles };
@@ -325,6 +411,8 @@ window.__ModuleLoader__.load({
       for (const roleId of ROLE_IDS) {
         const d = draft.roles?.[roleId] ?? {};
         for (const field of PRESET_FIELDS) {
+          // council.enabled is derived from the seats; never write it.
+          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;
           const path = ['presets', presetName, roleId, field];
           const dv = d[field];
           const bv = getPath(base, path);
@@ -340,6 +428,16 @@ window.__ModuleLoader__.load({
           const dv = d[field];
           const uv = getPath(user, path);
           if (dv === undefined) {
+            if (uv !== undefined) ops.push({ op: 'unset', path });
+          } else if (!deepEqualJson(uv, dv)) {
+            ops.push({ op: 'set', path, value: dv });
+          }
+        }
+        for (const field of ADVANCED_TEXT_FIELDS) {
+          const path = ['advanced', 'roles', roleId, field];
+          const dv = d[field];
+          const uv = getPath(user, path);
+          if (dv === undefined || dv === '') {
             if (uv !== undefined) ops.push({ op: 'unset', path });
           } else if (!deepEqualJson(uv, dv)) {
             ops.push({ op: 'set', path, value: dv });
@@ -534,7 +632,7 @@ window.__ModuleLoader__.load({
       // Compare against the editor's own view of the baseline: a draft built
       // from buildDraft(effective) yields exact equality for untouched fields,
       // so only genuine overrides are persisted (unset = inherit defaults).
-      const baselineDraft = buildDraft(effective, effective?.advanced);
+      const baselineDraft = buildDraft(effective, effective?.advanced, baseline ?? config);
       const out = {
         preset,
         mcpServers: config.mcpServers ?? {},
@@ -546,6 +644,7 @@ window.__ModuleLoader__.load({
         const baseRole = baselineDraft.roles[roleId] ?? {};
         const record = {};
         for (const field of PRESET_FIELDS) {
+          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;
           const value = role[field];
           if (value === undefined || deepEqualJson(value, baseRole[field])) continue;
           record[field] = value;
@@ -556,6 +655,11 @@ window.__ModuleLoader__.load({
           const value = role[field];
           if (value === undefined || value === '' || deepEqualJson(value, baseRole[field])) continue;
           advanced[field] = parseAdvancedNumber(value, field);
+        }
+        for (const field of ADVANCED_TEXT_FIELDS) {
+          const value = role[field];
+          if (value === undefined || value === '' || deepEqualJson(value, baseRole[field])) continue;
+          advanced[field] = value;
         }
         if (Object.keys(advanced).length > 0) out.advanced.roles[roleId] = advanced;
       }
@@ -690,25 +794,30 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function RoleRow({ roleId, draft, groups, modelsStatus, advOpen, onAdvancedToggle, onChange, t }) {
+    function RoleRow({ roleId, draft, groups, modelsStatus, advOpen, onAdvancedToggle, onChange, t, showSwitch = true, statusText }) {
       const role = draft.roles[roleId];
       const locked = roleId === 'observer';
       const effortOptions = effortOptionsFor(groups, role.provider, role.model);
       const effortBad = effortMismatch(role.effort, groups, role.provider, role.model);
-      const descKey = `role${roleId[0].toUpperCase()}${roleId.slice(1)}`;
+      const descKey = COUNCIL_DESC_KEYS[roleId] ?? `role${roleId[0].toUpperCase()}${roleId.slice(1)}`;
       const invalid = {
         maxTokens: role.maxTokens !== undefined && role.maxTokens !== '' && parseAdvancedNumber(role.maxTokens, 'maxTokens') === null,
         temperature: role.temperature !== undefined && role.temperature !== '' && parseAdvancedNumber(role.temperature, 'temperature') === null,
+        personaAppend: personaAppendInvalid(role.personaAppend),
       };
       // Two-line layout (GUI acceptance): line 1 = switch + name + description;
       // line 2 = model select (grows, full model names visible) + effort +
       // advanced toggle — controls align across roles regardless of name length.
       return React.createElement('div', { style: { border: `1px solid ${color.border}`, borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 } },
         React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 } },
-          React.createElement(Switch, {
-            checked: role.enabled !== false, disabled: locked,
-            onChange: () => onChange(roleId, { enabled: !(role.enabled !== false) }), label: `${roleId} ${t('enabled')}`,
-          }),
+          showSwitch
+            ? React.createElement(Switch, {
+              checked: role.enabled !== false, disabled: locked,
+              onChange: () => onChange(roleId, { enabled: !(role.enabled !== false) }), label: `${roleId} ${t('enabled')}`,
+            })
+            : React.createElement('span', {
+              style: { fontSize: 11, lineHeight: '16px', padding: '2px 8px', borderRadius: 999, border: `1px solid ${color.border}`, color: color.secondary, flex: 'none' },
+            }, statusText),
           React.createElement('span', { style: { fontSize: 13, fontWeight: 600, color: color.text, flex: 'none' } }, roleId),
           React.createElement('span', {
             style: { fontSize: 11, color: color.tertiary, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -751,8 +860,14 @@ window.__ModuleLoader__.load({
                 onChange: (e) => onChange(roleId, { temperature: e.target.value }), style: controlStyle,
               })),
           ),
-          (invalid.maxTokens || invalid.temperature) ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } },
-            invalid.maxTokens ? t('invalidMaxTokens') : t('invalidTemperature')) : null,
+          COUNCIL_ROLE_IDS.includes(roleId) ? React.createElement(Field, { label: t('personaAppend') },
+            React.createElement('textarea', {
+              value: role.personaAppend ?? '', rows: 3, placeholder: t('personaAppendHint'), disabled: locked,
+              onChange: (e) => onChange(roleId, { personaAppend: e.target.value === '' ? undefined : e.target.value }),
+              style: { ...controlStyle, minHeight: 56, resize: 'vertical', fontFamily: 'inherit', width: '100%' },
+            })) : null,
+          (invalid.maxTokens || invalid.temperature || invalid.personaAppend) ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } },
+            invalid.personaAppend ? t('personaAppendInvalid') : invalid.maxTokens ? t('invalidMaxTokens') : t('invalidTemperature')) : null,
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12, background: color.warnBg, borderRadius: 8, padding: '6px 8px' } },
             renderIcon(ui, ICON_WARNING, { size: 14 }), t('advancedWarn')),
         ) : null,
@@ -866,8 +981,8 @@ window.__ModuleLoader__.load({
         : selectedId === NEW_PROFILE_SENTINEL
           ? (newDraft?.sourceConfig ?? base)
           : mergeProfileConfig(base, selectedProfile?.config ?? {});
-      const current = draft ?? buildDraft(editEffective, editEffective?.advanced);
-      const baseline = buildDraft(editEffective, editEffective?.advanced);
+      const current = draft ?? buildDraft(editEffective, editEffective?.advanced, base);
+      const baseline = buildDraft(editEffective, editEffective?.advanced, base);
       const ops = isBundled && draft !== undefined ? planUserOps(base, user, draft) : [];
       const dirty = isBundled
         ? ops.length > 0
@@ -876,6 +991,7 @@ window.__ModuleLoader__.load({
         const role = current.roles[roleId];
         return parseAdvancedNumber(role.maxTokens, 'maxTokens') === null
           || parseAdvancedNumber(role.temperature, 'temperature') === null
+          || personaAppendInvalid(role.personaAppend)
           // A stored effort the selected model cannot take (e.g. flash+medium)
           // blocks saving until reselected or cleared (clear = inherit).
           || effortMismatch(role.effort, models.groups, role.provider, role.model);
@@ -883,7 +999,7 @@ window.__ModuleLoader__.load({
 
       const changeRole = (roleId, patch) => {
         setDraft((previous) => {
-          const next = previous ?? buildDraft(editEffective, editEffective?.advanced);
+          const next = previous ?? buildDraft(editEffective, editEffective?.advanced, base);
           return { ...next, roles: { ...next.roles, [roleId]: { ...next.roles[roleId], ...patch } } };
         });
       };
@@ -1107,7 +1223,7 @@ window.__ModuleLoader__.load({
       const reset = async () => {
         setConfirmReset(false);
         if (isBundled) {
-          const resetDraft = buildDraft(base, base?.advanced);
+          const resetDraft = buildDraft(base, base?.advanced, base);
           const resetOps = planUserOps(base, user, resetDraft);
           if (resetOps.length === 0) { setDraft(undefined); return; }
           await run(resetOps, t('resetDone'));
@@ -1116,7 +1232,7 @@ window.__ModuleLoader__.load({
         // Custom profiles: restore the LOCAL edit to the bundled defaults;
         // nothing is persisted until the user saves (spec: reset only touches
         // what is being edited).
-        const defaultsDraft = buildDraft(base, base?.advanced);
+        const defaultsDraft = buildDraft(base, base?.advanced, base);
         if (!deepEqualJson(defaultsDraft, baseline)) setDraft(defaultsDraft);
       };
       // Expanded by default: on DSH 0.2 the card is a settings page (the
@@ -1149,11 +1265,45 @@ window.__ModuleLoader__.load({
         }),
       );
 
-      const roleRows = ROLE_IDS.map((roleId) => React.createElement(RoleRow, {
+      const enabledSeats = COUNCILLOR_ROLE_IDS.filter((roleId) => {
+        const role = current.roles[roleId];
+        return role !== undefined && role.enabled !== false;
+      });
+      const councilOn = enabledSeats.length >= MIN_COUNCIL_SEATS;
+      const councilStatusText = councilOn
+        ? t('councilOn').replace('{seats}', enabledSeats.map((roleId) => roleId.replace('councillor-', '')).join(', '))
+        : t('councilOff');
+      const councilWarnings = councilWarningKeys(current).map((key) => t(key));
+      // observer is force-disabled (no attachment forwarding yet) and parked
+      // last; the Council group takes its previous position above it.
+      const upstreamRows = UPSTREAM_ROLE_IDS.filter((roleId) => roleId !== 'observer').map((roleId) => React.createElement(RoleRow, {
         key: roleId, roleId, draft: current, groups: models.groups, modelsStatus: models.status,
         advOpen: expanded[roleId] === true,
         onAdvancedToggle: () => toggleAdvanced(roleId), onChange: changeRole, t,
       }));
+      const observerRow = React.createElement(RoleRow, {
+        key: 'observer', roleId: 'observer', draft: current, groups: models.groups, modelsStatus: models.status,
+        advOpen: expanded.observer === true,
+        onAdvancedToggle: () => toggleAdvanced('observer'), onChange: changeRole, t,
+      });
+      const councilRows = COUNCIL_ROLE_IDS.map((roleId) => React.createElement(RoleRow, {
+        key: roleId, roleId, draft: current, groups: models.groups, modelsStatus: models.status,
+        advOpen: expanded[roleId] === true,
+        onAdvancedToggle: () => toggleAdvanced(roleId), onChange: changeRole, t,
+        // The synthesizer has no switch: it follows the seats. The row only
+        // configures its model/effort/prompt and shows the derived state.
+        showSwitch: roleId !== COUNCIL_ROLE_ID,
+        statusText: councilOn ? t('councilAutoOn') : t('councilAutoOff'),
+      }));
+      const councilGroup = React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+        React.createElement('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 } },
+          React.createElement('span', { style: { fontSize: 13, fontWeight: 600, color: color.text, flex: 'none' } }, t('councilGroup')),
+          React.createElement('span', { style: { fontSize: 11, color: councilOn ? color.secondary : color.tertiary, minWidth: 0 } }, councilStatusText),
+        ),
+        ...councilWarnings.map((text, index) => React.createElement('div', { key: 'warn-' + index, style: { fontSize: 11, lineHeight: '16px', color: color.warn } }, text)),
+        ...councilRows,
+      );
+      const roleRows = [...upstreamRows, councilGroup, observerRow];
 
       // The profile strip lives at the top of the expanded card: choosing a
       // profile only changes WHAT is edited; the session is untouched.
@@ -1331,6 +1481,7 @@ window.__ModuleLoader__.load({
     exports.initialProfileRoster = initialProfileRoster;
     exports.normalizeProfileRoster = normalizeProfileRoster;
     exports.mergeProfileConfig = mergeProfileConfig;
+    exports.councilWarningKeys = councilWarningKeys;
     exports.validateProfileName = validateProfileName;
     exports.draftToConfig = draftToConfig;
     exports.createProfileAdapter = createProfileAdapter;

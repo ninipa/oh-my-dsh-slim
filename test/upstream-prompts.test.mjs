@@ -4,6 +4,7 @@ import { upstream as readUpstream } from './upstream-baseline.mjs';
 import yaml from 'js-yaml';
 import { plugins, definition, parsePlanSection } from '../npm-package/preset/preset.js';
 import { ROLE_TABLE, composeRolePersona, patchedContext, resolveRole } from '../npm-package/preset/roles.js';
+import { UPSTREAM_ROLE_IDS } from '../npm-package/preset/role-ids.js';
 import { roleDescription } from '../npm-package/preset/role-wording.js';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -99,7 +100,9 @@ test('every prompt variable in the preset is one the 0.2.1 renderer registers', 
   }
 });
 
-for (const roleId of Object.keys(ROLE_TABLE)) {
+// The six upstream roles stay byte-identical to 0.5.3. Council roles are a
+// 0.8.0 addition with no upstream row; they get dedicated assertions below.
+for (const roleId of UPSTREAM_ROLE_IDS) {
   test(roleId + ' persona and role description exactly match upstream', () => {
     const id = 'tool-subagent-' + roleId;
     const body = row(id).config.definition.persona;
@@ -112,6 +115,33 @@ for (const roleId of Object.keys(ROLE_TABLE)) {
     assert.equal(row(id).config.maxDepth, 1);
   });
 }
+
+for (const roleId of ['councillor-alpha', 'councillor-beta', 'councillor-gamma']) {
+  test(roleId + ' is a read-only council seat with its own tool row', () => {
+    const id = 'tool-subagent-' + roleId;
+    const body = row(id).config.definition.persona;
+    assert.ok(body.includes('You are a councillor in a multi-model council.'), roleId + ': councillor persona');
+    assert.ok(body.includes('read-only access to the codebase'), roleId + ': read-only facts');
+    assert.ok(body.includes('cannot see the other councillors'), roleId + ': independence');
+    assert.deepEqual(ROLE_TABLE[roleId].fixedAllow, ['read', 'glob', 'grep'], roleId + ': permission ceiling');
+    assert.equal(row(id).config.provider, 'spawn');
+    assert.equal(row(id).config.backgroundMode, 'continuable');
+    assert.equal(row(id).config.maxDepth, 1);
+  });
+}
+
+test('council synthesizer is tool-less and fixes the report shape', () => {
+  const body = row('tool-subagent-council').config.definition.persona;
+  assert.ok(body.includes('You have NO tools'), 'synthesizer declares no tools');
+  assert.ok(body.includes('## Council Response'), 'first report section');
+  assert.ok(body.includes('## Per-Councillor Details'), 'per-seat section');
+  assert.ok(body.includes('## Council Summary'), 'summary section');
+  assert.ok(body.includes('Consensus Level: unanimous | majority | split'), 'consensus vocabulary');
+  assert.ok(body.includes('single-view report, not a consensus'), 'single-response degradation');
+  assert.equal(ROLE_TABLE.council.synthesisOnly, true, 'synthesisOnly flag drives the empty filter');
+  assert.equal(row('tool-subagent-council').config.provider, 'spawn');
+  assert.equal(row('tool-subagent-council').config.maxDepth, 1);
+});
 
 test('user role route and persona append precede row agent options without changing the role body', () => {
   const directory = mkdtempSync(join(tmpdir(), 'omds-upstream-prompts-'));

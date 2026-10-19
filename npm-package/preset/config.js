@@ -15,6 +15,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readHostConfig } from '../lib/config-settings.js';
+import {
+  COUNCIL_ROLE_ID, COUNCILLOR_ROLE_IDS, MIN_COUNCIL_SEATS, ROLE_IDS, UPSTREAM_ROLE_IDS,
+  isCouncilRoleId,
+} from './role-ids.js';
+
+export { COUNCIL_ROLE_ID, COUNCILLOR_ROLE_IDS, MIN_COUNCIL_SEATS, ROLE_IDS, UPSTREAM_ROLE_IDS, isCouncilRoleId };
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_NAME = 'oh-my-dsh-slim.json';
@@ -23,8 +29,6 @@ const PROFILE_DIR_TEST_ENV = 'OH_MY_DSH_SLIM_PROFILE_DIR';
 
 /** The documentation namespace name, kept for 0.1.x compatibility. */
 export const SETTINGS_NS = 'oh-my-dsh-slim';
-/** Roles this preset knows about, in presentation order. */
-export const ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
 
 /**
  * The preset's FACTORY effort vocabulary: what defaults.json ships and what the
@@ -47,6 +51,10 @@ const RUNTIME_DEFAULTS = {
   explorer: { temperature: 0.1, maxTokens: 32000 },
   librarian: { temperature: 0.1, maxTokens: 48000 },
   observer: { temperature: 0.1, maxTokens: 24000 },
+  'councillor-alpha': { temperature: 0.1, maxTokens: 48000 },
+  'councillor-beta': { temperature: 0.1, maxTokens: 48000 },
+  'councillor-gamma': { temperature: 0.1, maxTokens: 48000 },
+  council: { temperature: 0.1, maxTokens: 32000 },
 };
 
 const TOOL_NAMES = new Set([
@@ -199,6 +207,44 @@ function validateRole(roleId, role, servers) {
   if (role.mcps !== undefined && (!Array.isArray(role.mcps) || role.mcps.some((name) => typeof name !== 'string' || !servers[name]))) {
     throw new Error('oh-my-dsh-slim: ' + roleId + '.mcps references an unknown MCP server');
   }
+  // Council roles are read-only (seats) or tool-less (synthesizer). MCP tools
+  // are appended to the child assembly by role-mcp.js outside tools.restrict,
+  // so a configured mcps list would bypass that boundary entirely.
+  if (isCouncilRoleId(roleId) && Array.isArray(role.mcps) && role.mcps.length > 0) {
+    throw new Error('oh-my-dsh-slim: ' + roleId + '.mcps is not supported: council roles cannot mount MCP tools (they would bypass the read-only/synthesis-only restriction)');
+  }
+  if (role.personaAppend !== undefined && typeof role.personaAppend !== 'string') {
+    throw new Error('oh-my-dsh-slim: ' + roleId + '.personaAppend must be a string');
+  }
+  if (typeof role.personaAppend === 'string') {
+    if (role.personaAppend.length > 8000) {
+      throw new Error('oh-my-dsh-slim: ' + roleId + '.personaAppend must be at most 8000 characters');
+    }
+    // The role persona section renders with interpolate:false, so a variable
+    // would reach the child literally; reject it instead of surprising the
+    // author (and it can never abort a strict-interpolation host turn).
+    if (role.personaAppend.includes('{{')) {
+      throw new Error('oh-my-dsh-slim: ' + roleId + '.personaAppend must not contain {{...}}: role persona text is rendered literally');
+    }
+  }
+}
+
+/**
+ * The council seats enabled in a merged roles map, in seat order.
+ * @param roles - the effective roles map (`loadConfig().roles`).
+ */
+export function councilSeats(roles) {
+  return COUNCILLOR_ROLE_IDS.filter((roleId) => roles?.[roleId]?.enabled === true);
+}
+
+/**
+ * Whether the council is active: MIN_COUNCIL_SEATS seats are enabled. One seat
+ * is an ordinary read-only delegation, not a council; the synthesizer mounts
+ * only when this returns true.
+ * @param roles - the effective roles map (`loadConfig().roles`).
+ */
+export function councilActive(roles) {
+  return councilSeats(roles).length >= MIN_COUNCIL_SEATS;
 }
 
 /**
@@ -239,6 +285,10 @@ export function loadConfig(ctx) {
     roles[roleId] = mergeRole(roleId, defaultPreset?.[roleId], userRoles[roleId], advancedRoles[roleId]);
     validateRole(roleId, roles[roleId], servers);
   }
+  // The synthesizer has no user-facing switch: it is active exactly when at
+  // least MIN_COUNCIL_SEATS seats are. Derive AFTER the merge so every channel
+  // (card, named profile, JSON file) yields the same effective document.
+  roles[COUNCIL_ROLE_ID] = { ...roles[COUNCIL_ROLE_ID], enabled: councilActive(roles) };
   return freeze({
     source,
     preset: user.preset ?? defaults.preset,

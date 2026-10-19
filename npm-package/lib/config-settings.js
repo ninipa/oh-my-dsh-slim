@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { ROLE_IDS } from '../preset/role-ids.js';
 const factoryDefaults = JSON.parse(readFileSync(new URL('../preset/defaults.json', import.meta.url), 'utf8'));
 
 export const SETTINGS_NS = 'oh-my-dsh-slim';
@@ -41,7 +42,7 @@ export function buildConfigSchema(z) {
   const orchestrator = () => z.object({ effort: effort(), mcps: z.array(z.string()) });
   const preset = () => z.object({
     orchestrator: orchestrator(),
-    ...Object.fromEntries(['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'].map(id => [id, role()])),
+    ...Object.fromEntries(ROLE_IDS.map(id => [id, role()])),
   });
   return z.object({
     preset: z.string().default(defaults.preset).volatile().description('Named role configuration within presets (not a native session preset).'),

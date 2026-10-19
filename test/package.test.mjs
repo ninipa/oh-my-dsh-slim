@@ -307,3 +307,25 @@ test('the preset declares one role tool per advertised role', async () => {
     assert.equal(roles.roleIdFromEvents([{ type: 'subagent/descriptor', data: { persona } }]), roleId);
   }
 });
+
+test('the client bundle keeps the backend role roster in sync', async () => {
+  // The client bundle cannot import Node modules, so it keeps literal copies of
+  // the roster. A release that adds a role without touching the card would make
+  // that role invisible (or, worse, show a stale switch list).
+  const config = await import(pathToFileURL(join(root, 'npm-package', 'preset', 'config.js')).href);
+  const source = readFileSync(join(root, 'npm-package', 'client', 'client.js'), 'utf8');
+  const list = (name) => {
+    const match = source.match(new RegExp('const ' + name + ' = \\[([^\\]]*)\\];'));
+    assert.ok(match, name + ' is declared in the client bundle');
+    return match[1].split(',').map((entry) => entry.trim().replace(/^'|'$/g, '')).filter(Boolean);
+  };
+  const upstream = list('UPSTREAM_ROLE_IDS');
+  const seats = list('COUNCILLOR_ROLE_IDS');
+  const council = source.match(/const COUNCIL_ROLE_ID = '([^']+)';/)[1];
+  assert.deepEqual(upstream, [...config.UPSTREAM_ROLE_IDS], 'upstream roster');
+  assert.deepEqual(seats, [...config.COUNCILLOR_ROLE_IDS], 'council seat roster');
+  assert.equal(council, config.COUNCIL_ROLE_ID, 'synthesizer role id');
+  assert.deepEqual([...upstream, ...seats, council], [...config.ROLE_IDS], 'composed roster');
+  assert.match(source, /const ROLE_IDS = \[\.\.\.UPSTREAM_ROLE_IDS, \.\.\.COUNCILLOR_ROLE_IDS, COUNCIL_ROLE_ID\];/,
+    'ROLE_IDS must be composed, not duplicated as a literal');
+});

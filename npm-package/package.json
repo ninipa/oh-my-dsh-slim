@@ -1,7 +1,7 @@
 {
   "name": "oh-my-dsh-slim",
-  "version": "0.7.0",
-  "description": "oh-my-opencode-slim-style specialist subagent delegation preset for DeepSeek Harness \u2014 declarative agent preset with orchestrator + six specialist roles, background-first delegation, JSON-driven configuration.",
+  "version": "0.8.0",
+  "description": "oh-my-opencode-slim-style specialist subagent delegation preset for DeepSeek Harness — declarative agent preset with orchestrator + six specialist roles plus a three-seat council, background-first delegation, JSON-driven configuration.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -26,7 +26,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepare": "node -e \"const fs=require('node:fs');for(const f of ['README.md','CHANGELOG.md']){try{fs.copyFileSync('../'+f,f)}catch{}}\""
+    "prepare": "node -e \"const fs=require('node:fs');for(const f of ['README.md','CHANGELOG.md']){const src='../'+f;if(!fs.existsSync(src))throw new Error('prepare: missing '+src);fs.copyFileSync(src,f)}\""
   },
   "exports": {
     ".": "./lib/index.js",

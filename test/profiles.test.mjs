@@ -64,7 +64,12 @@ test('none does not reach stock child preflight and restrictions exclude unknown
 test('named composition identity reaches all config consumers only', () => {
   const definition = namedDefinition({}, 'profile-test', { displayName: 'Test', config: {} });
   const rows = definition.plugins.flatMap(row => row.group ? row.config : [row]);
-  const consumers = rows.filter(row => /(?:roles|role-mcp|subagent-roles)\.js$/.test(row.name ?? ''));
+  const consumers = rows.filter(row => /(?:roles|role-mcp|subagent-roles|role-composition|council-mode)\.js$/.test(row.name ?? ''));
   assert.ok(consumers.length > 0);
   for (const row of consumers) assert.equal(row.config.profileId, 'profile-test');
+  // The role composition is a security boundary: under a named profile it must
+  // read that profile's seat filters, not the active/bundled config.
+  const composition = rows.find(row => /role-composition\.js$/.test(row.name ?? ''));
+  assert.ok(composition, 'role-composition row is part of the preset');
+  assert.equal(composition.config.profileId, 'profile-test');
 });

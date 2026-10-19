@@ -131,6 +131,7 @@ console.log('\n[planUserOps]');
 // Fixture mirrors the real base shape: every role carries enabled/provider/
 // model/effort (as the shipped defaults.json does).
 const roleDefaults = (provider, model, effort) => ({ enabled: true, provider, model, effort });
+const seatDefaults = () => ({ enabled: false, tools: ['read', 'glob', 'grep'], mcps: [] });
 const BASE = {
   preset: 'p',
   presets: {
@@ -141,6 +142,10 @@ const BASE = {
       explorer: roleDefaults('prov', 'm1', 'low'),
       librarian: roleDefaults('prov', 'm1', 'high'),
       observer: roleDefaults('prov', 'm1', 'high'),
+      'councillor-alpha': seatDefaults(),
+      'councillor-beta': seatDefaults(),
+      'councillor-gamma': seatDefaults(),
+      council: { enabled: false, mcps: [] },
     },
   },
   advanced: { roles: {} },
@@ -213,9 +218,93 @@ console.log('\n[buildDraft]');
   const draft = card.buildDraft(value, value.advanced);
   check(draft.preset === 'p', 'preset name carried');
   check(draft.roles.oracle.enabled === false && draft.roles.oracle.model === 'y', 'preset-layer fields surfaced');
-  check(draft.roles.observer.enabled === true, 'missing enabled defaults to true');
+  check(draft.roles.observer.enabled === true, 'without a base, a missing role still defaults enabled');
   check(draft.roles.fixer.maxTokens === 5 && draft.roles.oracle.maxTokens === undefined, 'advanced layer surfaced per role');
 
+  // Upgrade safety: a settings document written before a role existed must
+  // inherit that role's SHIPPED enabled bit, never default it to on. Otherwise
+  // the first unrelated save silently enables every role added in the release.
+  const oldDocument = { preset: 'p', presets: { p: {} }, advanced: { roles: {} } };
+  const newBase = JSON.parse(JSON.stringify(BASE));
+  newBase.presets.p.oracle = { ...newBase.presets.p.oracle, enabled: false };
+  const upgraded = card.buildDraft(oldDocument, oldDocument.advanced, newBase);
+  check(upgraded.roles.oracle.enabled === false, 'missing role inherits the shipped enabled bit from the base');
+  const upgradeOps = card.planUserOps(newBase, {}, upgraded);
+  check(upgradeOps.length === 0, `an upgrade draft against the base plans no writes (${JSON.stringify(upgradeOps)})`);
+  // A partial role object still inherits per-field (enabled present, model absent).
+  const partial = { preset: 'p', presets: { p: { oracle: { enabled: true } } }, advanced: { roles: {} } };
+  const partialDraft = card.buildDraft(partial, partial.advanced, BASE);
+  check(partialDraft.roles.oracle.model === 'm1' && partialDraft.roles.oracle.effort === 'high',
+    'a partial role entry inherits provider/model/effort field by field');
+}
+
+console.log('\n[council card]');
+{
+  check(source.includes('const COUNCILLOR_ROLE_IDS = [\'councillor-alpha\', \'councillor-beta\', \'councillor-gamma\'];'), 'seat roster declared once');
+  check(source.includes("const ROLE_IDS = [...UPSTREAM_ROLE_IDS, ...COUNCILLOR_ROLE_IDS, COUNCIL_ROLE_ID];"), 'role roster composes the council family');
+  check(source.includes('councilGroup') && source.includes('councilNeedsSeats') && source.includes('councilSameModel'),
+    'council group and warnings are part of the card bundle');
+  check(source.includes('councilInheritedModels'), 'the inherited-model warning is part of the card bundle');
+  check(source.includes("UPSTREAM_ROLE_IDS.filter((roleId) => roleId !== 'observer')")
+    && source.includes('const roleRows = [...upstreamRows, councilGroup, observerRow];'),
+    'the Council group sits between librarian and the parked observer row');
+  check(typeof card.councilWarningKeys === 'function', 'warning derivation is exported for tests');
+
+  const warnDraft = (seats) => ({ preset: 'p', roles: Object.fromEntries(
+    [...['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer', 'council'].map((id) => [id, { enabled: id === 'council' ? false : true }]),
+     ...Object.entries(seats)]) });
+  check(card.councilWarningKeys(warnDraft({ 'councillor-alpha': { enabled: true } })).join(',') === 'councilNeedsSeats',
+    'one seat warns that a council needs two');
+  check(card.councilWarningKeys(warnDraft({ 'councillor-alpha': { enabled: true }, 'councillor-beta': { enabled: true } })).join(',') === 'councilInheritedModels',
+    'two seats with inherited models warn about the repeat sample');
+  check(card.councilWarningKeys(warnDraft({
+    'councillor-alpha': { enabled: true, provider: 'a', model: 'm1' },
+    'councillor-beta': { enabled: true, provider: 'b', model: 'm2' },
+  })).length === 0, 'distinct explicit models warn about nothing');
+  check(card.councilWarningKeys(warnDraft({
+    'councillor-alpha': { enabled: true, provider: 'a', model: 'm1' },
+    'councillor-beta': { enabled: true, provider: 'a', model: 'm1' },
+  })).join(',') === 'councilSameModel', 'identical explicit models warn about the repeat sample');
+  check(card.councilWarningKeys(warnDraft({
+    'councillor-alpha': { enabled: true, provider: 'a', model: 'm1' },
+    'councillor-beta': { enabled: true },
+  })).join(',') === 'councilInheritedModels', 'a mixed set still warns about the inherited seat');
+  check(source.includes('personaAppend') && source.includes('textarea'), 'seat prompt input is part of the card bundle');
+  check(source.includes('DERIVED_ENABLED_ROLES'), 'derived-enabled roles are declared');
+
+  const clean = card.buildDraft(effective({}), effective({}).advanced, BASE);
+  check(clean.roles['councillor-alpha'].enabled === false && clean.roles.council.enabled === false,
+    'shipped council roles render disabled');
+
+  // A seat prompt persists on the advanced layer.
+  const withPrompt = card.buildDraft(effective({}), effective({}).advanced, BASE);
+  withPrompt.roles['councillor-alpha'].personaAppend = 'Focus on failure recovery.';
+  const promptOps = card.planUserOps(BASE, {}, withPrompt);
+  check(promptOps.length === 1 && promptOps[0].op === 'set'
+    && promptOps[0].path.join('.') === 'advanced.roles.councillor-alpha.personaAppend'
+    && promptOps[0].value === 'Focus on failure recovery.', `seat prompt plans one advanced write (${JSON.stringify(promptOps)})`);
+  const promptDoc = card.draftToConfig(withPrompt, {}, BASE);
+  check(promptDoc.advanced.roles['councillor-alpha'].personaAppend === 'Focus on failure recovery.',
+    'seat prompt serializes into the profile document');
+  const cleared = card.buildDraft(effective({ advanced: { roles: { 'councillor-alpha': { personaAppend: 'old' } } } }), undefined, BASE);
+  cleared.roles['councillor-alpha'].personaAppend = undefined;
+  const clearedOps = card.planUserOps(BASE, { advanced: { roles: { 'councillor-alpha': { personaAppend: 'old' } } } }, cleared);
+  check(clearedOps.some(op => op.op === 'unset' && op.path.join('.') === 'advanced.roles.councillor-alpha.personaAppend'),
+    'clearing a seat prompt plans an unset');
+
+  // Enabling seats must never persist the derived synthesizer bit.
+  const seatsOn = card.buildDraft(effective({}), effective({}).advanced, BASE);
+  seatsOn.roles['councillor-alpha'].enabled = true;
+  seatsOn.roles['councillor-beta'].enabled = true;
+  seatsOn.roles.council.enabled = true;
+  const seatOps = card.planUserOps(BASE, {}, seatsOn);
+  check(!seatOps.some(op => op.path.join('.') === 'presets.p.council.enabled'), 'the derived synthesizer bit is never written');
+  check(seatOps.some(op => op.path.join('.') === 'presets.p.councillor-alpha.enabled' && op.value === true), 'seat toggles are written');
+
+  // A prompt with an unregistered variable is rejected by validation.
+  let rejected = false;
+  try { validateConfigDocument({ roles: { 'councillor-alpha': { personaAppend: '{{model}}' } } }); } catch { rejected = true; }
+  check(rejected, 'the host-side validation also rejects {{...}} in a seat prompt');
 }
 
 // -------------------------------------------------------------- profiles
@@ -501,7 +590,24 @@ console.log('\n[rc.2 contract + baseline preservation]');
   check(events.disposed === true, 'disposing the client removes its whileServed registration');
   check(source.includes('await scope.mutate(writeOps, snap.revision);'), 'bundled settings writes pass the rc.2 revision fence');
   const legacy = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'legacy', 'v0.5.3', 'npm-package', 'client', 'client.js'), 'utf8');
-  const helperRegion = (text) => text.slice(text.indexOf('    function parseAdvancedNumber'), text.indexOf('    // ----------------------------------------------------------------- apply')).replaceAll('\r\n', '\n');
+  // The 0.8.0 council UI intentionally changes RoleRow and the card layout, so
+  // the historical byte comparison covers the pure helpers (write planner,
+  // draft builder, profile serialization) up to RoleRow; the card itself is
+  // exercised by the behavioral checks in this file.
+  const helperRegion = (text) => text.slice(text.indexOf('    function parseAdvancedNumber'), text.indexOf('    function RoleRow(')).replaceAll('\r\n', '\n');
+  // Whole-function substitution for the one helper whose 0.8.0 change is
+  // intentional (base inheritance for missing roles). Field-level replaces
+  // would also eat the same identifiers in mergeProfileConfig.
+  const extractBuildDraft = (text) => {
+    const at = text.indexOf('function buildDraft(');
+    const comment = text.lastIndexOf('/**', at);
+    return text.slice(comment, text.indexOf('\n    }\n', at) + '\n    }\n'.length);
+  };
+  const currentBuildDraft = extractBuildDraft(source);
+  const legacyBuildDraft = extractBuildDraft(legacy);
+  const derivedSkip = "          // council.enabled is derived from the seats; never write it.\n          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n";
+  const derivedTextOps = "        for (const field of ADVANCED_TEXT_FIELDS) {\n          const path = ['advanced', 'roles', roleId, field];\n          const dv = d[field];\n          const uv = getPath(user, path);\n          if (dv === undefined || dv === '') {\n            if (uv !== undefined) ops.push({ op: 'unset', path });\n          } else if (!deepEqualJson(uv, dv)) {\n            ops.push({ op: 'set', path, value: dv });\n          }\n        }\n";
+  const derivedTextAdvanced = "        for (const field of ADVANCED_TEXT_FIELDS) {\n          const value = role[field];\n          if (value === undefined || value === '' || deepEqualJson(value, baseRole[field])) continue;\n          advanced[field] = value;\n        }\n";
   const normalize = (text) => text
     .replaceAll('await scope.mutate(writeOps, snap.revision);', 'await scope.mutate(writeOps);')
     // 0.2 primitives renamed the icon exports; the card resolves them at runtime.
@@ -549,7 +655,19 @@ console.log('\n[rc.2 contract + baseline preservation]');
         "        }",
         "        Promise.resolve(remote.session.modelCatalog()).then((response) => {",
       ].join('\n'),
-    );
+    )
+    // 0.8.0 makes the editor inherit missing roles from the shipped base (so a
+    // release that adds roles cannot silently enable them) and derives the
+    // council synthesizer's enabled bit from its seats. Normalize those
+    // intentional changes back to the legacy text before comparing.
+    .replaceAll(currentBuildDraft, legacyBuildDraft)
+    .replaceAll(derivedSkip, '')
+    .replaceAll("          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n", '')
+    .replaceAll(derivedTextOps, '')
+    .replaceAll(derivedTextAdvanced, '')
+    .replaceAll('buildDraft(effective, effective?.advanced, baseline ?? config)', 'buildDraft(effective, effective?.advanced)')
+    .replaceAll('buildDraft(editEffective, editEffective?.advanced, base)', 'buildDraft(editEffective, editEffective?.advanced)')
+    .replaceAll('buildDraft(base, base?.advanced, base)', 'buildDraft(base, base?.advanced)');
   check(normalize(helperRegion(source)) === normalize(helperRegion(legacy)), 'historical helpers and complete card behavior are preserved apart from the rc.2 revision argument and the icon-name adaptation');
   for (const [manifestPath, expectedClient] of [['package.json', './npm-package/client/client.js'], ['npm-package/package.json', './client/client.js']]) {
     const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', manifestPath), 'utf8'));

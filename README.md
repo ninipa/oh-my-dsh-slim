@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.7.0 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.0 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -8,11 +8,11 @@ an orchestrator plus five enabled specialist roles, delivered as a **declarative
 preset**. It mounts from the plugin bundle; it is not a standalone application or a preset
 directory to copy.
 
-> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested host: DSH 0.2.0-rc.2.** The gate follows npm range
-> semantics: later 0.2.0 prereleases (rc.3) and stable 0.2.x are admitted without a tested claim,
-> while prereleases of later patch versions — for example `0.2.1-alpha.2`, the current host `alpha`
-> tag — are refused until a release admits them. Upgrade policy: retain compatibility within the 0.2
-> line while the required APIs remain available; verify new host releases before claiming support.
+> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested hosts: DSH 0.2.0-rc.2 and 0.2.1-rc.2.** The gate is
+> a per-core allowlist: 0.2.0 and 0.2.1 prereleases, stable releases and later patches are admitted;
+> prereleases of a higher patch or minor core (for example `0.2.2-rc.1`) are refused until a release
+> admits them. Upgrade policy: retain compatibility within the 0.2 line while the required APIs
+> remain available; verify new host releases before claiming support.
 > The 0.3 line requires a separate review.
 > **DSH ≤0.1.5: stay on `oh-my-dsh-slim@0.5.3`.** Hosts between that line and rc.2 must upgrade DSH.
 > 0.6.1 passed 101 automated tests, six base-composition installed-host smoke sentinels, and the five
@@ -50,12 +50,51 @@ the orchestrator must not redo a running lane's work or claim completion from an
 A report is not a settlement. The runtime settlement notice allows integration; `subagent_result`
 reads a finished child's final message without waking it or consuming another model turn.
 
+## Council
+
+Three read-only seats plus one tool-less synthesizer: the same question goes to
+several independent models and comes back as one report with a consensus level.
+Everything ships disabled; a council is active only when **at least two seats**
+are enabled, and a single enabled seat is an ordinary read-only delegation.
+
+| Role | Tool | Permission | Default |
+|---|---|---|---|
+| councillor-alpha / beta / gamma | subagent_councillor_alpha / … | read-only (read/glob/grep ceiling, narrowable only) | off |
+| council | subagent_council | no tools (synthesis only) | derived from the seats |
+
+- Give each seat its own provider/model/effort in the card's Council group;
+  different models are what make the council worth its cost.
+- **A seat without provider/model inherits the session model.** If every seat inherits, the
+  council is a repeat sample of one model; the card warns about it.
+- The synthesizer has no switch: it mounts when two or more seats are enabled,
+  and the whole council disappears (tools and prompt section) with the seats.
+- Council roles cannot use MCP servers (validation rejects `mcps`); the
+  orchestrator fetches external material and puts it in the seat prompts.
+- A seat prompt can be appended under the seat's Advanced section
+  (`personaAppend`); it renders literally, so do not write `{{variables}}`.
+- Usage: ask explicitly ("use council to evaluate …", "let a few models look at
+  this"). The orchestrator dispatches every seat in one parallel step, waits for
+  all settlements, then calls the synthesizer. Ordinary questions never trigger
+  it; say "don't use council" to opt out.
+- Cost: at least four model sessions (three seats + synthesis) per run — the
+  most expensive path in the preset; use it deliberately.
+- Limits: fixed three seats, no fallback chains, no `@council` mention routing;
+  the section is injected only into the top-level agent, and a cold-resumed seat
+  stays read-only.
+- Troubleshooting: if the card says Council is active but a new session has no
+  `subagent_councillor_*` / `subagent_council` tools, first confirm it is a new session; the
+  host log's `omds-council-mode` warning names the missing seat or synthesizer tool.
+- Other boundaries: one council occupies three seats plus the synthesizer and shares the host's
+  `maxActiveSubagents` pool (default 8); there is no code-level timeout or kill switch (abort the
+  run manually if a seat hangs); per-seat MCP is **intentionally disabled** (MCP tools bypass
+  `tools.restrict`).
+
 ## Install a released version (then restart)
 
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.7.0
+oh-my-dsh-slim@0.8.0
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -65,7 +104,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.7.0
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.0
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules
