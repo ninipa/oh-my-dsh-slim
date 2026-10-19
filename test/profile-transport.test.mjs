@@ -75,18 +75,22 @@ test('actual host register fences before bridge, forwards native handler and pee
     return { ok: true, value: ['profile'] };
   };
   const nativeFetchHandler = {};
+  let registrationPeer;
   const register = new Function('assertChannel', 'rpcFetchHandler', 'bridge', `return (${method});`)(
     channel => assert.equal(channel, '/omds'),
     (channel, handler, actualPeer) => {
       assert.equal(handler, callback);
-      assert.equal(actualPeer, peer);
-      nativeFetchHandler.invoke = () => handler('profile-list', {}, signal, actualPeer);
+      // 0.2.0 hands the peer to rpcFetchHandler at registration; 0.2.1 hands it
+      // to the request bridge instead, so it is undefined here by design.
+      if (actualPeer !== undefined) assert.equal(actualPeer, peer);
+      registrationPeer = actualPeer;
+      nativeFetchHandler.invoke = (requestPeer = registrationPeer) => handler('profile-list', {}, signal, requestPeer);
       return nativeFetchHandler;
     },
-    async (req, res, handler) => {
+    async (req, res, handler, requestPeer) => {
       bridged++;
       assert.equal(handler, nativeFetchHandler);
-      res.result = await handler.invoke();
+      res.result = await handler.invoke(requestPeer);
     },
   );
   const connection = { operator: peer, admit: req => req.admission };

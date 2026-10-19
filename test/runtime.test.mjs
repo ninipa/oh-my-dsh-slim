@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { hostImport } from '../npm-package/preset/bridge.js';
-import { patchedContext, roleIdForAgent, stockConfig } from '../npm-package/preset/roles.js';
+import { patchedContext, roleIdForAgent, stockConfig, fitFilterToKnown } from '../npm-package/preset/roles.js';
 import { apply as applyRoleRequests } from '../npm-package/preset/subagent-roles.js';
 import { apply as applyEarlyClose } from '../npm-package/preset/early-close-context.js';
 
@@ -85,14 +85,17 @@ test('metadata lookup failure retains upstream fail-open effort validation', asy
   assert.equal(output.reasoningEffort, loadConfig().roles.oracle.effort);
 });
 
-test('stock config forwards child model parameters and readonly deny filter', () => {
+test('stock config keeps host-known keys and drops persona/toolFilter', () => {
   const filter = { deny: ['write', 'edit', 'pwsh'] };
   const options = { provider: 'p', model: 'm', reasoningEffort: 'high', maxTokens: 100 };
-  const config = stockConfig({ provider: 'in-process', definition: { roleId: 'explorer' } }, {
+  const config = stockConfig({ provider: 'in-process', backgroundMode: 'continuable', definition: { roleId: 'explorer' } }, {
     agentOptions: options, persona: 'role marker', toolName: 'subagent_explorer', toolFilter: filter,
   });
   assert.equal(config.agentOptions, options);
-  assert.equal(config.toolFilter, filter);
+  assert.equal(config.toolName, 'subagent_explorer');
+  assert.equal(config.backgroundMode, 'continuable');
+  assert.equal(config.persona, undefined);
+  assert.equal(config.toolFilter, undefined);
   assert.equal(config.definition, undefined);
 });
 
@@ -120,44 +123,55 @@ for (const scoped of [false, true]) test(`actual stock registration keeps role d
     tools: runtime,
     subagents: { getProvider: () => provider, resolveMaxDepth: () => undefined },
     sessionProjections: { register() {}, stateOf: () => [{ provider: 'p', model: 'm' }] },
-    systemPrompt: { section() {}, getSectionOrder: () => 1 },
+    systemPrompt: { section() {}, context() {}, getSectionOrder: () => 1, getContextOrder: () => 1 },
     logger: { info() {}, warn() {} },
     on: (event, fn) => { callbacks.set(event, fn); },
+    effect: callback => { callback(); return () => {}; },
     get(service) { return ({ tools: runtime, agents: { list: () => [candidate] }, subagents: this.subagents, subagentModelSelection: {} })[service]; },
-    inject(dependencies, fn) { assert.deepEqual(dependencies, ['tools', 'subagents', 'systemPrompt']); fn(this); return { dispose: async () => {} }; },
+    inject(dependencies, fn) { assert.ok(dependencies.includes('tools') && dependencies.includes('subagents') && dependencies.includes('systemPrompt')); fn(this); return { dispose: async () => {} }; },
   };
   candidate.ctx = ctx;
   const seen = {};
   const childOptions = { provider: 'p', model: 'm', reasoningEffort: 'high', maxTokens: 100 };
-  const readonlyFilter = { allow: ['read', 'skill'], deny: ['write', 'edit', 'pwsh', 'skill'] };
   const requests = [];
+  const activations = [];
   const parent = { id: parentId, options: { provider: 'parent-provider', model: 'parent-model' },
     ctx: { scope: compositionScope, get: key => key === 'tools' ? { view: scope => { assert.equal(scope, compositionScope); return { restrictableNames: new Set(['read', 'write', 'edit', 'pwsh']) }; } } : undefined } };
   const originalGet = ctx.get;
   ctx.get = function (key) { return key === 'llm' ? { resolveCallConfig: async () => {} } : originalGet.call(this, key); };
-  ctx.subagents.startContinuable = async request => { requests.push(request); return { childId }; };
+  // 0.2.0 starts through startContinuable/start; 0.2.1 through startActivation.
+  ctx.subagents.startActivation = async spec => { activations.push(spec); return { childId }; };
+  ctx.subagents.startContinuable = async spec => { requests.push(spec); return { childId }; };
   const foreground = [];
   ctx.subagents.start = async (providerName, request) => { foreground.push({ providerName, request }); return { id: 'foreground-test', result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose() {} }; };
-  stockApply()(patchedContext(ctx, seen, { toolName: 'subagent_explorer', description: 'Readonly explorer', stock: { provider: 'in-process', backgroundMode: 'continuable' } }, undefined, undefined, ctx => ctx?.scope), {
+  stockApply()(patchedContext(ctx, seen, { roleId: 'oracle', toolName: 'subagent_explorer', description: 'Readonly explorer', stock: { provider: 'in-process', backgroundMode: 'continuable' } }, undefined, undefined, ctx => ctx?.scope), {
     provider: 'in-process', toolName: 'subagent_explorer', backgroundMode: 'continuable', maxDepth: 'provider-managed', modelSelectionSettings: scoped,
-    agentOptions: childOptions, toolFilter: readonlyFilter, persona: 'role marker',
+    agentOptions: childOptions,
   });
   const tool = tools.find(value => value.name === 'subagent_explorer');
   assert.ok(seen.patched);
   assert.match(tool.description, /^Delegate a self-contained task/);
   assert.match(tool.description, / Role profile: Readonly explorer/);
-  assert.match(tool.parameters.run_in_background.description, /only when the user explicitly asked to wait in place/);
-  assert.match(tool.description, /background by default/);
+  if (tool.parameters.run_in_background) assert.match(tool.parameters.run_in_background.description, /only when the user explicitly asked to wait in place/);
+  assert.match(tool.description, /in the background/);
+  if (!tool.parameters.run_in_background) assert.doesNotMatch(tool.description, /run_in_background/);
   await tool.execute({ description: 'Search', prompt: 'Find callers' }, { agent: parent, signal: new AbortController().signal });
-  assert.equal(requests[0].request.agentOptions, childOptions);
-  assert.deepEqual(requests[0].request.toolFilter, { allow: ['read'], deny: ['write', 'edit', 'pwsh'] });
-  assert.deepEqual(readonlyFilter, { allow: ['read', 'skill'], deny: ['write', 'edit', 'pwsh', 'skill'] });
-  assert.equal(requests[0].request.persona, 'role marker');
-  assert.equal(requests[0].request.parent, parent);
-  await tool.execute({ description: 'Search foreground', prompt: 'Find callers', run_in_background: false }, { agent: parent, signal: new AbortController().signal });
-  assert.equal(foreground[0].providerName, 'in-process');
-  assert.deepEqual(foreground[0].request.toolFilter, { allow: ['read'], deny: ['write', 'edit', 'pwsh'] });
-  assert.equal(foreground[0].request.parent, parent);
+  const submitted = activations[0] ?? requests[0];
+  assert.ok(submitted, 'the stock implementation starts the child through the host service');
+  const request = submitted.request ?? submitted;
+  assert.equal(request.agentOptions, childOptions);
+  // 0.2.1 rejects these keys; on 0.2.0 the wrapper must not smuggle them in
+  // either — role-composition applies both on the child scope.
+  assert.equal(request.toolFilter, undefined);
+  assert.equal(request.persona, undefined);
+  assert.equal(request.parent, parent);
+  assert.equal(submitted.label, 'oracle · Search');
+  if (tool.parameters.run_in_background) {
+    await tool.execute({ description: 'Search foreground', prompt: 'Find callers', run_in_background: false }, { agent: parent, signal: new AbortController().signal });
+    assert.equal(foreground[0].providerName, 'in-process');
+    assert.equal(foreground[0].request.toolFilter, undefined);
+    assert.equal(foreground[0].request.parent, parent);
+  }
   if (scoped) {
     assert.match(tool.description, /Child LLM selection/);
     callbacks.get('agent/disposed')({ agent: candidate });
@@ -166,7 +180,7 @@ for (const scoped of [false, true]) test(`actual stock registration keeps role d
   }
 });
 
-test('actual ToolRuntime view and restrict accept filtered nested requests and preserve empty allow', { skip: referenceSkip('dsh-tools') }, async () => {
+test('actual ToolRuntime restrict accepts a normalized role filter and preserves empty allow', { skip: referenceSkip('dsh-tools') }, async () => {
   const source = readFileSync(referenceFile('dsh-tools'), 'utf8');
   const method = (name, end) => source.slice(source.indexOf(`\n\t${name}(`), source.indexOf(end, source.indexOf(`\n\t${name}(`)));
   // Execute the actual bundled ToolRuntime methods with only layer storage seams.
@@ -182,18 +196,16 @@ test('actual ToolRuntime view and restrict accept filtered nested requests and p
   } };
   assert.equal(runtime.restrictableNames, undefined);
   assert.throws(() => runtime.restrict({ deny: ['skill'] }), /unknown global tool/);
-  const calls = [];
-  const ctx = { tools: { register(tool) { calls.push(tool); } }, subagents: {
-    startContinuable(spec) { runtime.restrict(spec.request.toolFilter); return spec; },
-  }, get(key) { return this[key]; } };
-  const parent = { ctx: { scope, get: key => key === 'tools' ? runtime : undefined } };
-  const wrapped = patchedContext(ctx, {}, { toolName: 'test-role' }, undefined, undefined, ctx => ctx?.scope);
-  wrapped.tools.register({ name: 'test-role', execute: (_, exec) => wrapped.subagents.startContinuable({ request: { parent: exec.agent, toolFilter: { allow: ['skill'], deny: ['write', 'skill'] } } }) });
-  const result = await calls[0].execute({}, { agent: parent });
-  assert.equal(result.request.parent, parent);
-  assert.deepEqual(result.request.toolFilter, { allow: [], deny: ['write'] });
-  assert.equal(restrictions[0].allow.size, 0); // Empty allow remains deny-all, never widened.
-  assert.equal(restrictions[0].deny.has('write'), true);
+  // role-composition normalizes against the child's restrictableNames before
+  // calling restrict; unknown names are dropped, never forwarded.
+  const filter = fitFilterToKnown({ allow: ['read', 'skill'], deny: ['write', 'skill'] }, runtime.view(scope).restrictableNames);
+  assert.deepEqual(filter, { allow: ['read'], deny: ['write'] });
+  runtime.restrict(filter);
+  assert.deepEqual([...restrictions[0].allow], ['read']);
+  assert.deepEqual([...restrictions[0].deny], ['write']);
+  // Empty allow remains deny-all, never widened.
+  runtime.restrict({ allow: [] });
+  assert.equal(restrictions[1].allow.size, 0);
 });
 
 test('actual Cordis inject retains scoped service receiver and disposes registrations', { skip: skipCordis }, async () => {

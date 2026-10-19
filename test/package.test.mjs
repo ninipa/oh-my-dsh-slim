@@ -262,7 +262,11 @@ test('the role wrapper hands the host every service and key it needs', async () 
     { agentOptions: {}, persona: 'body', toolFilter: undefined, toolName: 'subagent_oracle' },
   );
   assert.equal(stock.toolName, 'subagent_oracle');
-  assert.equal(stock.persona, 'body');
+  // 0.2.1 rejects persona/toolFilter at the top of apply(); 0.2.0 applies the
+  // same two calls from the request. The wrapper composes them itself on the
+  // child scope, so neither key may reach the host config on either line.
+  assert.ok(!('persona' in stock), 'persona must not reach the host config');
+  assert.ok(!('toolFilter' in stock), 'toolFilter must not reach the host config');
   assert.ok(!('definition' in stock), 'the preset-only `definition` key must not reach the host');
   const role = roles.resolveRole({ provider: 'spawn', definition: { roleId: 'oracle', persona: 'body' } });
   assert.equal(role.stock.toolName, role.toolName, 'resolveRole forwards the row tool name');

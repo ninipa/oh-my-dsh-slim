@@ -12,6 +12,7 @@ be run against it.
 | Host-row audit | `DSH_HOST_REFERENCE_DIR=<installed host>/node_modules node scripts/audit-host-rows.mjs` | every preset row sharing an id with the host base bundle matches it or is a listed divergence; rows the host hands to the agent plane are composed or listed as a deliberate absence; the inherited plan-mode text equals the host's own parse | 0 |
 | Suite | `DSH_HOST_REFERENCE_DIR=<installed host>/node_modules node --test test/*.test.mjs` | packaging, settings/import safety, role routing, request/result, lifecycle, MCP scope, legacy archive bytes, host-row audit mechanism (including its failing cases) | 0 models |
 | Base host smoke | `DSH_HOST_ANCHOR=<installed host JS entry> node --expose-internals test/host-smoke.cjs` | real host boot with `dsh-base` + this package: version gate, roster, settings entry, profile endpoints (called directly), restart isolation, scope gate, tool filter | 0 models |
+| Role composition smoke | `DSH_HOST_ANCHOR=… node --expose-internals test/role-composition-smoke.cjs` | real host + the production `role-composition` row: descriptor label at `agent/created`, role persona in the child's first prompt, `restrict` removes write tools from the child only, `roleIdForAgent` resolves (per-role effort/MCP precondition) | 0 models |
 | Web host smoke | `DSH_HOST_ANCHOR=… node --expose-internals test/web-host-smoke.cjs` | real `dsh-base` + `dsh-web-app` composition over loopback HTTP: auth fence, all five `/omds` profile methods, envelope validation, restart persistence, route disposal, the plane split (host `tool-web` stays off) and the preset row's effective `web_search`/`web_fetch` | 0 models |
 | Declarative host probe | see below | what the running host actually exposes: roster/broken, settings entry, client-module source count | 0 models |
 | Real model run | not part of this line yet | provider/MCP E2E | needs credentials |
@@ -23,7 +24,10 @@ Notes:
 - A plain `npm install --prefix` host works for both smokes, but the *base* smoke needs host packages
   resolvable from the temporary home (or an ASAR anchor where `hostBaseUrl()` applies); otherwise it
   fails at row resolution before the assertions. The web smoke resolves host rows from the anchor and
-  needs no extra setup.
+  needs no extra setup. The role-composition smoke boots `dsh-base` and therefore needs the same
+  `$TMPDIR/node_modules/@deepseek-ai` link as the base smoke — point it at the host line under test.
+- Run every smoke once per supported line (`0.2.0-rc.2` and `0.2.1-rc.2`); the role smoke is the one
+  that exercises the 0.7.0 runtime channel end to end.
 - `legacy/v0.5.3/` must stay in the tree: `test/legacy-archive.test.mjs` reads it.
 
 Reference host for T0's audit, the suite, and both smokes:

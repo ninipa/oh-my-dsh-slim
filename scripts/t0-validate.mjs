@@ -10,6 +10,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { plugins } from '../npm-package/preset/preset.js';
+import { stockConfig } from '../npm-package/preset/roles.js';
+import { ADMITTED_PRERELEASE_CORES, VERIFIED_HOST_VERSIONS, hostVerdict } from '../npm-package/lib/host-version.js';
 import { auditHostRows, referenceHostDir } from './audit-host-rows.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,6 +69,16 @@ for (const [name, range] of Object.entries(pkgManifest.peerDependencies ?? {})) 
 }
 check(rootManifest.engines?.dsh === engines, 'root engines.dsh matches the package');
 
+// The host's manifest gate uses includePrerelease:true; ours is npm-default
+// semantics plus an explicit per-core allow-list (0.7.0). Keep both intents
+// pinned so a future edit cannot silently widen or narrow admission.
+check(JSON.stringify(ADMITTED_PRERELEASE_CORES) === '["0.2.0","0.2.1"]',
+  `prerelease cores are explicit (${JSON.stringify(ADMITTED_PRERELEASE_CORES)})`);
+check(VERIFIED_HOST_VERSIONS.includes('0.2.1-rc.2') && VERIFIED_HOST_VERSIONS.includes('0.2.0-rc.2'),
+  `verified hosts name both lines (${VERIFIED_HOST_VERSIONS.join(', ')})`);
+check(hostVerdict('0.2.1-rc.2').status === 'ok', 'gate admits the 0.2.1 line (this plan target)');
+check(hostVerdict('0.2.2-rc.1').status === 'unsupported', 'gate still refuses an unverified new prerelease core');
+
 // --------------------------------------------------- published file surface
 const files = pkgManifest.files ?? [];
 for (const required of ['lib', 'client', 'preset', 'cordis.patch.yml', 'LICENSE']) {
@@ -103,6 +115,18 @@ check(toolWeb?.config?.fetch === true && toolWeb?.config?.searchTimeoutMs === 60
 const planMode = rows.find((row) => row.id === 'plan-mode');
 check(typeof planMode?.config?.section === 'string' && planMode.config.section.trim() !== '',
   'plan-mode carries a non-empty baseline section (the host text is inherited at mount time)');
+
+// 0.2.1 rejects persona/toolFilter at the top of the stock apply; the wrapper
+// applies both on the child scope instead. Assert on the STOCK-SHAPED config,
+// not the YAML row: roleRow.definition still carries the persona for our own
+// modules, and that is intentional.
+const sampleRole = rows.find((row) => row.id.startsWith('tool-subagent-'));
+check(Boolean(sampleRole), 'the preset declares at least one role row');
+const sampleStock = stockConfig(sampleRole.config, { agentOptions: {}, persona: 'p', toolName: 'probe', toolFilter: { deny: ['write'] } });
+check(!('persona' in sampleStock) && !('toolFilter' in sampleStock),
+  'stockConfig never forwards persona/toolFilter (0.2.1 rejects them)');
+check(sampleStock.toolName === 'probe' && !('definition' in sampleStock),
+  'stockConfig still forwards toolName and drops definition');
 
 // ------------------------------------------------------- host-row audit
 const audit = auditHostRows({ referenceDir: referenceHostDir() });

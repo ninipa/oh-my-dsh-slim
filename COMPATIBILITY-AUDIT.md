@@ -3,6 +3,24 @@
 > Version labels: this release is published as `0.6.1`; `0.6.1-native.1/2/3` were the contributor's
 > pre-release iteration labels used during review. Historical references below keep those labels.
 
+## 0.7.0 addendum (2026-10-19): DSH 0.2.1
+
+DSH 0.2.1 removed `persona`/`toolFilter` from `dsh-tool-subagent` config (both are rejected at the
+top of `apply()`), removed `backgroundMode`/`run_in_background`, and replaced `start`/
+`startContinuable` with `startActivation`. 0.7.0 keeps the same product surface by moving role
+carrying into the preset's own runtime channel:
+
+- the row config no longer forwards persona/toolFilter on either host line;
+- `role-composition.js` applies `deployment:persona-prefix` + `tools.restrict` on the child scope at
+  `agent/created` (the same two calls 0.2.0's `applyChildComposition` made for us);
+- role identity is the `subagent/descriptor.label` prefix written by the role tool wrapper, read on
+  both live creation and cold resume; the old persona marker remains a fallback;
+- `backgroundMode: 'continuable'` stays because 0.2.0 reads it and 0.2.1 ignores it;
+- admission admits prereleases per core (`0.2.0`, `0.2.1`) while `engines.dsh` is unchanged.
+
+Verified on both lines: T0 (including the 0.2.1 host-row audit), 106/106 tests, base and web smokes,
+and `test/role-composition-smoke.cjs` (label, first prompt, child-only restriction, parent isolation).
+
 Baseline: ninipa/oh-my-dsh-slim `1a29e706710b0a967021fa963ba607b0e683029e` (0.5.3).
 Target: installed DSH 0.2.0-rc.2 only.
 

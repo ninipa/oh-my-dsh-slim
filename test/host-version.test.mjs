@@ -6,19 +6,20 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import {
-  MIN_HOST_VERSION, MAX_HOST_VERSION_EXCLUSIVE, VERIFIED_HOST_VERSIONS,
+  MIN_HOST_VERSION, MAX_HOST_VERSION_EXCLUSIVE, ADMITTED_PRERELEASE_CORES, VERIFIED_HOST_VERSIONS,
   compareSemver, hostVerdict, assertHostCompatible, detectHostDshVersion,
   assertNativePresetRegistry,
 } from '../npm-package/lib/host-version.js';
 
 const range = '>=0.2.0-rc.2 <0.3.0-0';
-const admitted = ['0.2.0-rc.2', '0.2.0-rc.3', '0.2.0-rc.10', '0.2.0', '0.2.1', '0.2.99'];
-const rejected = ['0.1.2-rc.1', '0.1.5-rc.2', '0.1.5', '0.1.6', '0.2.0-alpha.9', '0.2.0-rc.1', '0.2.1-rc.1', '0.3.0-0', '0.3.0-rc.1', '0.3.0', '1.0.0'];
+const admitted = ['0.2.0-rc.2', '0.2.0-rc.3', '0.2.0-rc.10', '0.2.0', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1', '0.2.99'];
+const rejected = ['0.1.2-rc.1', '0.1.5-rc.2', '0.1.5', '0.1.6', '0.2.0-alpha.9', '0.2.0-rc.1', '0.2.2-rc.1', '0.3.0-0', '0.3.0-rc.1', '0.3.0', '1.0.0'];
 
 test('both manifests declare the bounded upgrade policy for engines and all eight peers', () => {
   assert.equal(MIN_HOST_VERSION, '0.2.0-rc.2');
   assert.equal(MAX_HOST_VERSION_EXCLUSIVE, '0.3.0-0');
-  assert.deepEqual(VERIFIED_HOST_VERSIONS, ['0.2.0-rc.2']);
+  assert.deepEqual(ADMITTED_PRERELEASE_CORES, ['0.2.0', '0.2.1']);
+  assert.deepEqual(VERIFIED_HOST_VERSIONS, ['0.2.1-rc.2', '0.2.0-rc.2']);
   for (const file of ['../package.json', '../npm-package/package.json']) {
     const manifest = JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8'));
     assert.equal(manifest.engines.dsh, range);
@@ -29,7 +30,7 @@ test('both manifests declare the bounded upgrade policy for engines and all eigh
   }
 });
 
-test('effective gate respects prerelease ordering and npm default prerelease admission', () => {
+test('effective gate admits prereleases of allow-listed cores only', () => {
   assert.equal(compareSemver('0.2.0-rc.10', '0.2.0-rc.2'), 1);
   assert.equal(compareSemver('0.2.0-rc.2+build.1', '0.2.0-rc.2'), 0);
   for (const version of admitted) {
@@ -46,11 +47,22 @@ test('effective gate respects prerelease ordering and npm default prerelease adm
   assert.doesNotMatch(hostVerdict('0.3.0').message, /expected to be compatible/);
 });
 
-// Pinned development-only dependency: this check must run on clean checkouts.
-test('actual npm semver admits rc.3 but not later-patch or 0.3 prereleases', () => {
+// The 0.7.0 line deliberately diverges from npm's implicit prerelease rule for
+// the new core (0.2.1): npm rejects `0.2.1-rc.2`, our explicit allow-list
+// admits it. Every other verdict still matches npm, so an accidental widening
+// (or narrowing) shows up here.
+test('npm semver differs from the explicit policy only on allow-listed cores', () => {
   for (const version of [...admitted, ...rejected]) {
-    assert.equal(semver.satisfies(version, range), hostVerdict(version).status === 'ok', version);
+    const npmAdmits = semver.satisfies(version, range);
+    const ours = hostVerdict(version).status === 'ok';
+    const core = version.split('-')[0];
+    const intentional = version.includes('-') && ADMITTED_PRERELEASE_CORES.includes(core) && core !== '0.2.0';
+    assert.equal(ours, npmAdmits || intentional, version);
   }
+  assert.equal(semver.satisfies('0.2.1-rc.2', range), false);
+  assert.equal(hostVerdict('0.2.1-rc.2').status, 'ok');
+  assert.equal(semver.satisfies('0.2.2-rc.1', range), false);
+  assert.equal(hostVerdict('0.2.2-rc.1').status, 'unsupported');
 });
 
 function fixture(version) {

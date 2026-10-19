@@ -4,6 +4,45 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.7.0] — DSH 0.2.1: role carrying moves into the child scope
+
+DSH 0.2.1 removed `persona`/`toolFilter` from `dsh-tool-subagent`'s config and
+rejects both at the top of `apply()`; a child's composition is an Agent Preset
+now. This release moves role carrying into the preset's own runtime channel, so
+one artifact serves 0.2.0 and 0.2.1 alike.
+
+- **Single path.** `stockConfig()` no longer forwards `persona`/`toolFilter` on
+  either host line. `role-composition.js` applies the same
+  `systemPrompt.section('deployment:persona-prefix')` + `tools.restrict()` calls
+  the host used to make for us, on the child's scope at `agent/created`.
+- **One identity signal.** The role tool wrapper writes
+  `"<roleId> · <description>"` before delegating; the host persists it in
+  `subagent/descriptor.label` inside `setup()`, so `agent/created` resolves the
+  role for a live child and a cold resume from the same read. The old persona
+  marker stays as a fallback for children created by 0.6.x. The ALS-based
+  association and the `subagents` service proxy are gone.
+- **Per-role effort/temperature and per-role MCP keep working**:
+  `subagent-roles.js` and `role-mcp.js` are unchanged; the label reader restores
+  the role id they already consumed.
+- **Wording follows the tool shape**: `run_in_background` exists only on the
+  0.2.0 tool, so role descriptions and the orchestrator's background paragraph
+  describe the behavior instead of naming a missing parameter. `backgroundMode:
+  'continuable'` stays (0.2.0 needs it; 0.2.1 ignores it).
+- **Admission**: prereleases are admitted per core (`0.2.0`, `0.2.1`), so
+  `0.2.1-rc.2` is `ok` while `0.2.2-rc.1` still needs a new release.
+  `engines.dsh` is unchanged.
+- **Prompt text no longer carries `{{cwd}}`**: 0.2.1 interpolates prompt
+  sections strictly and registers only `provider` and `model`, so the 0.5.3
+  persona opener (`… Your working directory is {{cwd}}.`) aborted every turn
+  with `unknown prompt variable "{{cwd}}"`. The host now supplies the working
+  directory through its required `working-directory` context; the persona
+  opener matches the 0.2.1 first-party one. A new
+  `host-smoke` assertion renders the shipped persona through the host's own
+  renderer, so this class of break cannot ship silently again.
+- **Tests**: both host smokes run on 0.2.0 and 0.2.1; a new
+  `test/role-composition-smoke.cjs` proves the runtime channel end to end
+  (descriptor label, first prompt, child-only restriction, parent isolation).
+
 ## [0.6.3] — host-row ownership: restore web_fetch, stop copying host prose
 
 The declarative port rebuilt the agent plane row by row, and one copied value

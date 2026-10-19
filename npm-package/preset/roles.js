@@ -19,8 +19,10 @@
 // the preset keys on), and then calls the HOST's own \`apply\` with a stock-shaped
 // config. Because the wrapper declares no schema, the extra \`definition\` key
 // reaches us instead of being dropped, and no behavior is duplicated: provider
-// lifecycle checks, continuable routing, toolFilter forwarding, and the
-// \`subagent/provider-added\` wait all remain the host's implementation.
+// lifecycle checks, continuable routing, and the `subagent/provider-added` wait
+// all remain the host's implementation. The role's persona and tool surface are
+// NOT part of this config (0.2.1 rejects both): role-composition.js applies them
+// on the child scope, which is also what 0.2.0 did with our former config.
 //
 // The one thing that must be replaced is the registered description. The stock
 // plugin registers through \`runtimeCtx.tools.register(...)\`, so while applying
@@ -29,7 +31,6 @@
 // owns. Service identity is preserved by forwarding ordinary property reads to
 // the real runtime instance (so \`this\` inside the called method is the real one).
 
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { hostImport } from './bridge.js';
 import { patchRoleTool, patchRoleSection } from './role-wording.js';
 import { loadConfig, roleDefaults, bindProfileContext } from './config.js';
@@ -168,22 +169,47 @@ export function composeRolePersona(roleId, body, personaAppend, rowPersona) {
   ]);
 }
 
+/** Separator between the role id and the model-authored task description. */
+export const ROLE_LABEL_SEPARATOR = ' · ';
+
+/**
+ * The role id carried by a delegation label, or undefined.
+ *
+ * The role tool wrapper writes `"<roleId> · <description>"` before the stock
+ * implementation forwards `args.description` as `startActivation.label`, so the
+ * value is persisted in `subagent/descriptor.label`. The wrapper always writes
+ * the prefix, which is what makes the FIRST separator authoritative even when
+ * the model's own description contains one.
+ * @param label - a descriptor label.
+ */
+export function roleIdFromLabel(label) {
+  if (!text(label)) return undefined;
+  const at = label.indexOf(ROLE_LABEL_SEPARATOR);
+  if (at <= 0) return undefined;
+  const candidate = label.slice(0, at);
+  return ROLE_TABLE[candidate] === undefined ? undefined : candidate;
+}
+
 /**
  * Read a \`subagent/descriptor\` event out of a session event list and return the
- * role id embedded in its persona, or undefined.
+ * role id it carries, or undefined. Labels are the current signal; the persona
+ * marker stays as a fallback for children created before 0.7.0 that are cold-
+ * resumed afterwards.
  * @param events - a session event array.
  */
 export function roleIdFromEvents(events) {
   if (!Array.isArray(events)) return undefined;
   for (const event of events) {
     if (!event || event.type !== 'subagent/descriptor') continue;
+    const fromLabel = roleIdFromLabel(event.data?.label);
+    if (fromLabel !== undefined) return fromLabel;
     const persona = event.data?.persona;
     if (!text(persona)) continue;
     const at = persona.indexOf(ROLE_MARKER_PREFIX);
     if (at < 0) continue;
     const tail = persona.slice(at + ROLE_MARKER_PREFIX.length);
     const match = /^[a-z][a-z0-9_-]*/.exec(tail);
-    if (match !== null) return match[0];
+    if (match !== null && ROLE_TABLE[match[0]] !== undefined) return match[0];
   }
   return undefined;
 }
@@ -238,7 +264,11 @@ export function isSubagent(agent) {
  * Build the stock-shaped config handed to the host's own tool-subagent \`apply\`.
  *
  * Everything the host understands is preserved from the row config; only the
- * keys it does not know are dropped, and the per-role facts are added on top.
+ * keys it does not know are dropped. `persona`/`toolFilter` are deliberately
+ * NOT included: 0.2.1's apply rejects both outright, and 0.2.0 applies the same
+ * section/restrict calls from the request — so the role composition applies
+ * them itself in the child scope (role-composition.js). Keeping the row config
+ * free of them is what lets one code path serve both host lines.
  * @returns the config for the host implementation.
  */
 export function stockConfig(config, context) {
@@ -251,8 +281,6 @@ export function stockConfig(config, context) {
     // never reaches the model.
     toolName: context.toolName,
     ...(agentOptions === undefined ? {} : { agentOptions }),
-    persona: context.persona,
-    ...(context.toolFilter === undefined ? {} : { toolFilter: context.toolFilter }),
   };
 }
 
@@ -320,12 +348,12 @@ export function fitFilterToKnown(filter, known) {
   const names = new Set(known);
   return { ...(filter.allow === undefined ? {} : { allow: filter.allow.filter(name => names.has(name)) }), ...(filter.deny === undefined ? {} : { deny: filter.deny.filter(name => names.has(name)) }) };
 }
-export function patchedContext(ctx, seen, wanted, agents = new WeakMap(), execution = new AsyncLocalStorage(), scopeOf = () => undefined) {
+export function patchedContext(ctx, seen, wanted, agents = new WeakMap()) {
   const wrapAgent = (agent) => {
     if (!agent || typeof agent !== 'object') return agent;
     if (!agents.has(agent)) agents.set(agent, new Proxy(agent, {
       get(target, property, receiver) {
-        return property === 'ctx' ? patchedContext(target.ctx, seen, wanted, agents, execution, scopeOf) : Reflect.get(target, property, receiver);
+        return property === 'ctx' ? patchedContext(target.ctx, seen, wanted, agents) : Reflect.get(target, property, receiver);
       },
     }));
     return agents.get(agent);
@@ -337,6 +365,7 @@ export function patchedContext(ctx, seen, wanted, agents = new WeakMap(), execut
     const subagents = config.provider === undefined ? undefined : (typeof ctx.get === 'function' ? ctx.get('subagents') : ctx.subagents);
     return { ...config, toolName: wanted.toolName, description: wanted.description,
       mcps: wanted.mcps ?? [],
+      schedulable: seen.schedulable,
       inheritsParentContext: subagents?.getProvider?.(config.provider)?.inheritsParentContext === true,
     };
   };
@@ -359,9 +388,20 @@ export function patchedContext(ctx, seen, wanted, agents = new WeakMap(), execut
           return Reflect.apply(target.register, target, [definition]);
         }
         seen.patched = true;
+        // Shape fact used by the wording: 0.2.0 exposes run_in_background,
+        // 0.2.1 does not. No version branch is needed anywhere else.
+        seen.schedulable = Boolean(tool.parameters && 'run_in_background' in tool.parameters);
         const patched = patchRoleTool(tool, wordingOptions());
+        // The role id must survive into `subagent/descriptor.label`: it is the
+        // single identity signal that works for a live child and a cold resume
+        // alike (agent/created reads the descriptor before the first request).
+        const withRoleLabel = (args) => {
+          if (!args || typeof args !== 'object' || typeof args.description !== 'string' || !text(wanted.roleId)) return args;
+          const prefix = wanted.roleId + ROLE_LABEL_SEPARATOR;
+          return args.description.startsWith(prefix) ? args : { ...args, description: prefix + args.description };
+        };
         return Reflect.apply(target.register, target, [{ ...patched,
-          execute: (args, exec) => execution.run(exec?.agent, () => tool.execute(args, exec)),
+          execute: (args, exec) => tool.execute(withRoleLabel(args), exec),
         }]);
       };
     },
@@ -370,30 +410,8 @@ export function patchedContext(ctx, seen, wanted, agents = new WeakMap(), execut
     get(target, property, receiver) {
       if (property === 'tools') return new Proxy(runtime, wrapper);
       if (property === 'systemPrompt') return promptProxy(target.get?.('systemPrompt') ?? target.systemPrompt);
-      if (property === 'subagents') {
-        const service = target.get?.('subagents') ?? target.subagents;
-        if (!service || typeof service !== 'object') return service;
-        return new Proxy(service, { get(registry, key) {
-          const value = Reflect.get(registry, key);
-          if (key !== 'start' && key !== 'startContinuable') return typeof value === 'function' ? value.bind(registry) : value;
-          return (...args) => {
-            const parent = execution.getStore();
-            const tools = parent?.ctx?.get?.('tools') ?? parent?.ctx?.tools;
-            const known = tools?.view?.(scopeOf(parent?.ctx))?.restrictableNames;
-            return Reflect.apply(value, registry, args.map(arg => {
-              if (!arg || typeof arg !== 'object') return arg;
-              // start(provider, request) uses the direct filter; startContinuable
-              // uses spec.request.toolFilter. Never mutate the stock request.
-              if (key === 'startContinuable' && arg.request?.toolFilter !== undefined) {
-                return { ...arg, request: { ...arg.request, toolFilter: fitFilterToKnown(arg.request.toolFilter, known) } };
-              }
-              return arg.toolFilter === undefined ? arg : { ...arg, toolFilter: fitFilterToKnown(arg.toolFilter, known) };
-            }));
-          };
-        } });
-      }
       if (property === 'inject') return (dependencies, callback) => target.inject(dependencies,
-        (scope, config) => callback(patchedContext(scope, seen, wanted, agents, execution, scopeOf), config));
+        (scope, config) => callback(patchedContext(scope, seen, wanted, agents), config));
       if (property === 'get') return (serviceName, ...args) => {
         const service = target.get(serviceName, ...args);
         if (serviceName === 'systemPrompt') return promptProxy(service);
@@ -453,7 +471,6 @@ export function createRolePlugin(rawConfig) {
         return;
       }
       const stock = await loadStock(ctx);
-      const { scopeOf } = await hostImport(ctx, '@deepseek-ai/dsh-scope');
       const seen = { patched: false };
       // Mount through Cordis so host registrations/listeners share the stock
       // fiber's lifetime and declared dependencies, including scoped installs.
@@ -461,7 +478,7 @@ export function createRolePlugin(rawConfig) {
         name: stock.name,
         inject: stock.inject,
         apply(stockCtx) {
-          const scoped = patchedContext(stockCtx, seen, role, undefined, undefined, scopeOf);
+          const scoped = patchedContext(stockCtx, seen, role);
           if (isClass(stock)) return new stock(scoped, role.stock);
           return stock.apply(scoped, role.stock, undefined);
         },

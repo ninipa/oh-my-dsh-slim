@@ -69,6 +69,6 @@ test('context exposes matching wording through direct and get systemPrompt paths
   assert.equal(wrapped.subagents, undefined);
   for (const service of [wrapped.systemPrompt, wrapped.get('systemPrompt')]) service.section({ name: 'tool:' + options.toolName, text: ctx => ctx.visible ? 'native' : '' });
   for (const section of sections) assert.equal(section.text({ visible: true }), backgroundSection(options.toolName));
-  wrapped.tools.register({ name: options.toolName, description: 'Native', parameters: {}, execute() {} });
+  wrapped.tools.register({ name: options.toolName, description: 'Native', parameters: { run_in_background: {} }, execute() {} });
   assert.equal(registered[0].description, originalDescription(options));
 });

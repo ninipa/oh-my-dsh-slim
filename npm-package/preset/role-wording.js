@@ -15,25 +15,32 @@ export function providerWording(inheritsConversation) {
 function lifecycle(options) {
   const backgroundEnabled = options.enableRunInBackground !== false;
   const continuable = (options.backgroundMode ?? 'one-shot') === 'continuable';
+  // `schedulable` is a shape fact, not a host version: 0.2.1 removed the
+  // run_in_background parameter (every local child is continuable and returns
+  // an id immediately), so wording that names the parameter would describe an
+  // argument the model cannot pass.
+  const schedulable = options.schedulable !== false;
   const mcpServerNames = options.mcps ?? [];
   const mcpToolList = mcpServerNames.map((serverName) => `mcp__${serverName}__*`).join('/');
-  const foregroundMcpNote = backgroundEnabled && continuable && mcpServerNames.length > 0
+  const foregroundMcpNote = schedulable && backgroundEnabled && continuable && mcpServerNames.length > 0
     ? {
       description: ` Foreground runs (\`run_in_background: false\`) do not mount this role's MCP tools (${mcpToolList}); when the task needs MCP research, keep the run in the background and follow up with \`send_message\`.`,
       result: `(foreground run: this role's MCP tools (${mcpToolList}) were not mounted; prefer background + send_message when you need MCP research)`,
     }
     : undefined;
-  return { backgroundEnabled, continuable, foregroundMcpNote };
+  return { backgroundEnabled, continuable, schedulable, foregroundMcpNote };
 }
 
 export function roleDescription(options) {
   const wording = providerWording(options.inheritsParentContext === true);
-  const { backgroundEnabled, continuable, foregroundMcpNote } = lifecycle(options);
+  const { backgroundEnabled, continuable, schedulable, foregroundMcpNote } = lifecycle(options);
   return [wording.description, options.description]
     .filter((text) => typeof text === 'string' && text.length > 0).join(' Role profile: ')
     + (backgroundEnabled
       ? continuable
-        ? ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when the user explicitly asked to wait in place — a foreground run locks this conversation until the child returns and makes the child one-shot (no send_message follow-up, no carried context).'
+        ? schedulable
+          ? ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation. Set `run_in_background: false` only when the user explicitly asked to wait in place — a foreground run locks this conversation until the child returns and makes the child one-shot (no send_message follow-up, no carried context).'
+          : ' This tool starts the child in the background, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` starts a later turn in the same child conversation.'
         : ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
       : ' This call waits for the subagent and returns its result.')
     + (foregroundMcpNote?.description ?? '');
@@ -53,14 +60,16 @@ export function backgroundSection(toolName) {
 export function patchRoleTool(tool, options) {
   if (!tool || tool.name !== options.toolName) return tool;
   const parameters = { ...tool.parameters };
+  const schedulable = Boolean(parameters.run_in_background);
+  const shaped = { ...options, schedulable };
   if (parameters.prompt) parameters.prompt = { ...parameters.prompt, description: providerWording(options.inheritsParentContext === true).promptDescription };
   if (parameters.run_in_background) parameters.run_in_background = { ...parameters.run_in_background, description: schedulingDescription((options.backgroundMode ?? 'one-shot') === 'continuable') };
   // New rc.2 route fields remain native; retain their corresponding description
   // only when those fields actually exist on this tool.
   const routeStart = tool.description?.indexOf(' Child LLM selection is optional.');
   const routeNote = parameters.provider && parameters.model && routeStart >= 0 ? tool.description.slice(routeStart) : '';
-  const patched = { ...tool, parameters, description: roleDescription(options) + routeNote };
-  const { foregroundMcpNote } = lifecycle(options);
+  const patched = { ...tool, parameters, description: roleDescription(shaped) + routeNote };
+  const { foregroundMcpNote } = lifecycle(shaped);
   if (foregroundMcpNote && tool.output?.render) {
     patched.output = { ...tool.output, render(args, value) {
       const rendered = tool.output.render.call(tool.output, args, value);
@@ -81,8 +90,11 @@ export function patchRoleTool(tool, options) {
 /** Preserve native mounted/tool-visible guards; replace only this role's text. */
 export function patchRoleSection(section, options) {
   if (!section || section.name !== 'tool:' + options.toolName) return section;
-  const { backgroundEnabled, continuable } = lifecycle(options);
-  if (!backgroundEnabled || !continuable) return section;
+  const { backgroundEnabled, continuable, schedulable } = lifecycle(options);
+  // The host's own section already says "start in the background and continue
+  // working" on 0.2.1; replacing it would reintroduce a parameter that tool
+  // does not expose.
+  if (!schedulable || !backgroundEnabled || !continuable) return section;
   return { ...section, text(context) {
     const visible = typeof section.text === 'function' ? section.text(context) : section.text;
     return visible ? backgroundSection(options.toolName) : '';

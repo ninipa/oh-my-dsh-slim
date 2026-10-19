@@ -21,13 +21,33 @@ export const MIN_HOST_VERSION = '0.2.0-rc.2';
 export const MAX_HOST_VERSION_EXCLUSIVE = '0.3.0-0';
 
 /**
+ * Core versions whose prereleases this release admits.
+ *
+ * npm's default rule (a comparator naming `0.2.0-rc.2` admits later `0.2.0`
+ * prereleases only) stops at the first new patch core: `0.2.1-rc.2` is
+ * "unsupported" even though it is inside the declared range. The 0.7.0 line
+ * runs the same runtime channel on 0.2.0 and 0.2.1 (see
+ * PLAN-DSH-0.2.1-PORT.md), so the prerelease test becomes an explicit
+ * per-core allow-list instead of npm's implicit one.
+ *
+ * A prerelease of an admitted core is admitted, not verified: `VERIFIED_HOST_VERSIONS`
+ * names the exact builds exercised here. A future 0.2.2-rc.1 needs a new
+ * release that adds its core, preserving the "verify a new prerelease first"
+ * policy. Stable versions are admitted by the range alone.
+ *
+ * NOTE: the host's own manifest gate uses `includePrerelease: true`; this list
+ * is OUR runtime policy and the two must be reasoned about separately.
+ */
+export const ADMITTED_PRERELEASE_CORES = ['0.2.0', '0.2.1'];
+
+/**
  * Stable core version of the declarative preset line. Admission uses the
  * prerelease-aware minimum above, not this stable core marker.
  */
 export const DECLARATIVE_PRESET_VERSION = '0.2.0';
 
-/** Core versions this preset is known to work on, newest first. */
-export const VERIFIED_HOST_VERSIONS = ['0.2.0-rc.2'];
+/** Exact hosts verified with this line, newest first. */
+export const VERIFIED_HOST_VERSIONS = ['0.2.1-rc.2', '0.2.0-rc.2'];
 
 /** Highest 0.1.x core version verified with the directory-preset model. */
 export const LAST_DIRECTORY_PRESET_VERSION = '0.1.5-rc.2';
@@ -149,10 +169,12 @@ export function hostVerdict(host = detectHostDshVersion()) {
         + MIN_HOST_VERSION + ' or a host admitted by >= ' + MIN_HOST_VERSION + ' < ' + MAX_HOST_VERSION_EXCLUSIVE + '.',
     };
   }
-  // Match npm's default prerelease admission: a comparator naming 0.2.0-rc.2
-  // admits later 0.2.0 prereleases, not prereleases of later patch versions.
+  // The 0.7.0 line replaces npm's implicit "same core as the comparator"
+  // prerelease rule with an explicit per-core allow-list (see
+  // ADMITTED_PRERELEASE_CORES). Stable versions stay governed by the range.
+  const prereleaseCore = parsed.major + '.' + parsed.minor + '.' + parsed.patch;
   if (compareSemver(parsed, MAX_HOST_VERSION_EXCLUSIVE) >= 0
-      || (parsed.prerelease.length > 0 && (parsed.major !== 0 || parsed.minor !== 2 || parsed.patch !== 0))) {
+      || (parsed.prerelease.length > 0 && !ADMITTED_PRERELEASE_CORES.includes(prereleaseCore))) {
     return {
       status: 'unsupported',
       host,
@@ -195,6 +217,7 @@ export function assertNativePresetRegistry(ctx) {
 export default {
   MIN_HOST_VERSION,
   MAX_HOST_VERSION_EXCLUSIVE,
+  ADMITTED_PRERELEASE_CORES,
   assertNativePresetRegistry,
   DECLARATIVE_PRESET_VERSION,
   VERIFIED_HOST_VERSIONS,

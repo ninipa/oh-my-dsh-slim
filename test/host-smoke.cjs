@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const anchor = process.env.DSH_HOST_ANCHOR;
@@ -43,7 +44,10 @@ const hostImport = name => import(pathToFileURL(requireHost.resolve(name)).href)
   const profileContext = { home: smokeHome, dir: temporary, patchPath: path.join(temporary, 'cordis.patch.yml'), installAnchor: anchor, name: 'omds-native-smoke', startedBundles: [], bundles: ['omds-smoke-bundle'], overlays: [] };
   ctx = await boot('omds-native-smoke', configPath, patches, root => { root.provide('profileContext', profileContext); }, pathToFileURL(anchor).href);
   const versionModule = await import(pathToFileURL(path.join(packageDir, 'lib/host-version.js')).href);
-   assert.equal(versionModule.detectHostDshVersion({ ctx }), '0.2.0-rc.2');
+   // Parameterized on purpose: the same smoke runs against every installed host
+   // line (0.2.0-rc.2, 0.2.1-rc.2). Detecting the running host's own manifest is
+   // the assertion; a hard-coded version turns the suite into a 0.2.0 test.
+   assert.equal(versionModule.detectHostDshVersion({ ctx }), requireHost('@deepseek-ai/dsh/package.json').version);
    assert.equal(versionModule.assertHostCompatible({ ctx }).status, 'ok');
    console.log('NATIVE_HOST_VERSION_GATE_PASS');
    const registry = ctx.get('agentPresets');
@@ -92,6 +96,45 @@ const hostImport = name => import(pathToFileURL(requireHost.resolve(name)).href)
   assert.equal(afterRestart.defaultProfileId, first.id);
   console.log('NATIVE_PROFILE_RESTART_ISOLATION_PASS');
   const scope = await hostImport('@deepseek-ai/dsh-scope');
+   // Render the shipped persona through the host's own prompt renderer. 0.2.1
+   // interpolates strictly and throws on an unknown `{{name}}`, so a string
+   // copied from an older host (the 0.5.3 `{{cwd}}` opener) aborts every turn
+   // instead of degrading quietly. 0.2.0 has no interpolation; the capability
+   // check keeps one smoke honest on both lines.
+   const promptModule = await hostImport('@deepseek-ai/dsh-system-prompt');
+   const presetModule = await import(pathToFileURL(path.join(packageDir, 'preset/preset.js')).href);
+   const personaCopy = presetModule.plugins.find(entry => entry.id === 'persona').config;
+   const promptAgent = (await ctx.get('agents').create({ sessionId: 'prompt-render-' + randomUUID(),
+     meta: { cwd: temporary } })).agent;
+   // The smoke host has no LLM route; a real session resolves these from its
+   // selected model before the first assembly, and the host's `{{model}}`
+   // provider reads exactly this field.
+   promptAgent.options = { ...promptAgent.options, provider: 'smoke-provider', model: 'smoke-model' };
+   await promptAgent.ctx.plugin({
+     name: 'prompt-render-smoke',
+     inject: ['systemPrompt'],
+     apply(scopeCtx) {
+       scopeCtx.systemPrompt.section({
+         name: 'deployment:persona-prefix',
+         order: scopeCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
+         text: personaCopy.prefix,
+       });
+     },
+   });
+   const promptSystem = ctx.get('systemPrompt');
+   const assembly = await promptSystem.assemble({ agent: promptAgent, scope: scope.scopeOf(promptAgent.ctx) });
+   const personaSection = assembly.sections.find(section => section.name === 'deployment:persona-prefix');
+   assert.ok(personaSection, 'the persona section is registered on the agent scope');
+   const rendered = promptModule.renderPrompt({ sections: [personaSection], variables: assembly.variables, contexts: [] });
+   if (typeof promptSystem.variable === 'function') {
+     assert.ok(rendered.startsWith('You are a coding agent powered by the ' + promptAgent.options.model + ' model.'),
+       'the persona resolves the model variable the host registers');
+     assert.ok(!/\{\{[a-z]/.test(rendered), 'persona leaves no unresolved prompt variable: ' + rendered.slice(0, 120));
+   } else {
+     assert.ok(rendered.startsWith('You are a coding agent powered by the {{model}} model.'),
+       'a host without interpolation renders the persona literally, as before');
+   }
+   console.log('NATIVE_PROMPT_RENDER_PASS');
   const hook = await import(pathToFileURL(path.join(packageDir, 'preset/subagent-roles.js')).href);
   const namedRootA = scope.createScope(ctx, Symbol('profile-a'));
   const namedRootB = scope.createScope(ctx, Symbol('profile-b'));
@@ -115,15 +158,11 @@ const hostImport = name => import(pathToFileURL(requireHost.resolve(name)).href)
   assert.deepEqual(patched.map(row => row.temperature), [0.2, 0.8]);
   await childA.dispose(); await childB.dispose(); await namedRootA.dispose(); await namedRootB.dispose();
   console.log('NATIVE_PROFILE_SCOPE_GATE_PASS');
-   // Exercise the adapter with the installed ASAR ToolRuntime and real scopes.
+   // Exercise the installed ToolRuntime with real scopes: role-composition
+   // normalizes a role filter against restrictableNames before calling
+   // restrict(), which rejects unknown names outright.
    const roles = await import(pathToFileURL(path.join(packageDir, 'preset/roles.js')).href);
    const parentScope = scope.createScope(ctx, Symbol('filter-parent'));
-   const childScope = scope.createScope(parentScope.ctx, Symbol('filter-child'), { parent: scope.scopeOf(parentScope.ctx) });
-   let capturedTool;
-   const fakeRegistry = { async startContinuable(spec) {
-     childScope.ctx.get('tools').restrict(spec.request.toolFilter);
-     return spec;
-   } };
    const serviceTools = parentScope.ctx.get('tools');
    assert.equal(typeof serviceTools.view, 'function');
    assert.equal(serviceTools.restrictableNames, undefined);
@@ -132,19 +171,12 @@ const hostImport = name => import(pathToFileURL(requireHost.resolve(name)).href)
    assert.ok(valid, 'installed runtime has no restrictable tools');
    const missing = '__omds_missing_global_tool__';
    assert.ok(!known.has(missing));
-   const original = { request: { toolFilter: { allow: [valid, missing], deny: [missing] } } };
-   const adapterContext = new Proxy(parentScope.ctx, { get(target, key) {
-     if (key === 'get') return name => name === 'subagents' ? fakeRegistry : name === 'tools' ? new Proxy(serviceTools, { get(tools, property) {
-       return property === 'register' ? definition => { capturedTool = definition; } : Reflect.get(tools, property);
-     } }) : target.get(name);
-     return Reflect.get(target, key);
-   } });
-   const adapted = roles.patchedContext(adapterContext, {}, { toolName: 'filter-smoke', stock: {} }, undefined, undefined, scope.scopeOf);
-   adapted.get('tools').register({ name: 'filter-smoke', description: '', parameters: {}, execute: () => adapted.subagents.startContinuable(original) });
-   const filtered = await capturedTool.execute({}, { agent: { ctx: parentScope.ctx } });
-   assert.deepEqual(filtered.request.toolFilter, { allow: [valid], deny: [] });
-   assert.deepEqual(original.request.toolFilter, { allow: [valid, missing], deny: [missing] });
-   await childScope.dispose(); await parentScope.dispose();
+   const filter = roles.fitFilterToKnown({ allow: [valid, missing], deny: [missing] }, known);
+   assert.deepEqual(filter, { allow: [valid], deny: [] });
+   const disposeFilter = serviceTools.restrict(filter);
+   assert.equal(typeof disposeFilter, 'function');
+   disposeFilter();
+   await parentScope.dispose();
    console.log('NATIVE_TOOL_FILTER_START_PASS');
  } finally {
   if (ctx) await ctx.fiber.dispose();

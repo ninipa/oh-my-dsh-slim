@@ -54,10 +54,49 @@ test('native model-facing tool composition matches upstream without optional new
   assert.deepEqual(row('delegation').isolate, { workflowEngine: true });
 });
 
-test('main persona is the exact upstream 0.5.3 text, not a summary', () => {
-  assert.equal(row('persona').config.prefix, original('persona').config.prefix);
+test('main persona follows the 0.2.1 prompt contract, not the 0.5.3 cwd opener', () => {
+  // Deliberate override (0.7.0): 0.2.1 removed the `run_in_background`
+  // parameter, so the shared prompt describes the behavior instead of naming an
+  // argument the tool no longer exposes. 0.2.1 also interpolates prompt text
+  // strictly and registers only `provider` and `model`, so the 0.5.3 opener's
+  // `{{cwd}}` would abort every turn there; the host now delivers the working
+  // directory as required context instead. Everything else stays byte-identical.
+  const upstream = original('persona').config.prefix;
+  const upstreamOpener =
+    'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.';
+  const hostOpener = 'You are a coding agent powered by the {{model}} model.';
+  const withParameter =
+    'Pass run_in_background: false only when the user explicitly asked to wait in place (e.g. "directly wait for it") and you have exactly this one item — a foreground run LOCKS this conversation until the child returns and makes the child one-shot (no send_message follow-up, no carried context).';
+  const withoutParameter =
+    'Wait in place only when the user explicitly asked to wait (e.g. "directly wait for it") and you have exactly this one item; when the tool offers a foreground/one-shot choice, that run LOCKS this conversation until the child returns and makes the child one-shot (no send_message follow-up, no carried context).';
+  assert.ok(upstream.startsWith(upstreamOpener), 'upstream opener moved; update the documented override');
+  assert.ok(upstream.includes(withParameter), 'upstream sentence moved; update the documented override');
+  assert.equal(row('persona').config.prefix,
+    upstream.replace(upstreamOpener, hostOpener).replace(withParameter, withoutParameter));
   assert.equal(row('persona').config.suffix,
     'On Windows, references to bash/Bash above mean the native pwsh tool; elsewhere they mean bash.');
+});
+
+test('every prompt variable in the preset is one the 0.2.1 renderer registers', () => {
+  // 0.2.1 throws on an unknown `{{name}}` at assembly time, which fails the whole
+  // turn; a string copied from an older host (e.g. `{{cwd}}`) is not inert.
+  const allowed = new Set(['provider', 'model']);
+  const found = [];
+  const walk = (value, where) => {
+    if (typeof value === 'string') {
+      for (const match of value.matchAll(/\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g)) found.push([where, match[1]]);
+      return;
+    }
+    if (Array.isArray(value)) return value.forEach((entry, index) => walk(entry, where + '[' + index + ']'));
+    if (value && typeof value === 'object') {
+      for (const [key, entry] of Object.entries(value)) walk(entry, where + '.' + key);
+    }
+  };
+  walk(plugins, 'plugins');
+  assert.ok(found.length > 0, 'the persona interpolates the model id; an empty walk means the scanner broke');
+  for (const [where, name] of found) {
+    assert.ok(allowed.has(name), `${where} references {{${name}}}, which the 0.2.1 renderer does not register`);
+  }
 });
 
 for (const roleId of Object.keys(ROLE_TABLE)) {
