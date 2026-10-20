@@ -33,6 +33,11 @@ window.__ModuleLoader__.load({
     });
 
     const NS = 'oh-my-dsh-slim';
+    // Shipped package version, shown in the card header. The browser bundle has
+    // no build step or package metadata, so this is a literal; T0 and
+    // client-card.test.mjs compare it with package.json so a release bump
+    // cannot silently leave the header stale.
+    const VERSION = '0.8.1';
     const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
@@ -512,9 +517,18 @@ window.__ModuleLoader__.load({
           profiles.push(next);
         }
       }
-      const defaultProfileId = typeof payload?.defaultProfileId === 'string'
+      // The host's new-session default is a NATIVE agent preset id and may be
+      // a preset this card does not own (dsh-base ships "standard"). Only an id
+      // present in this roster can be marked; a foreign default is reported as
+      // no default instead of silently pinning the bundled profile (which
+      // would both select the wrong editor target and claim a default that is
+      // not actually set).
+      const requestedDefaultId = typeof payload?.defaultProfileId === 'string'
         ? payload.defaultProfileId
-        : profiles.find((profile) => profile.isDefaultForNewSessions)?.id ?? BUNDLED_PROFILE_ID;
+        : profiles.find((profile) => profile.isDefaultForNewSessions)?.id;
+      const defaultProfileId = profiles.some((profile) => profile.id === requestedDefaultId)
+        ? requestedDefaultId
+        : undefined;
       return {
         profiles: profiles.map((profile) => ({
           ...profile,
@@ -609,14 +623,49 @@ window.__ModuleLoader__.load({
         && profile.isDefaultForNewSessions !== true;
     }
 
+    /** Whether `id` names a profile the dropdown can select, or the draft. */
+    function selectionInRoster(id, roster) {
+      return id === NEW_PROFILE_SENTINEL
+        || (Array.isArray(roster?.profiles) && roster.profiles.some((profile) => profile.id === id));
+    }
+
     /**
      * The dropdown selection once the roster is known: the new-session
      * default, unless the user already picked a profile manually (anything
-     * other than the still-untouched bundled initial value).
+     * other than the still-untouched bundled initial value). Only ids present
+     * in the roster are selectable: the host default may be a native preset
+     * this card does not own, and a custom profile may disappear on reload.
      */
     function resolveInitialSelection(current, roster) {
-      const wanted = roster?.defaultProfileId ?? BUNDLED_PROFILE_ID;
-      return current === BUNDLED_PROFILE_ID && wanted !== BUNDLED_PROFILE_ID ? wanted : current;
+      const known = new Set((roster?.profiles ?? []).map((profile) => profile.id));
+      if (current === NEW_PROFILE_SENTINEL) return current;
+      const wanted = roster?.defaultProfileId;
+      if (current !== undefined && known.has(current)) {
+        return current === BUNDLED_PROFILE_ID
+          && wanted !== undefined
+          && wanted !== BUNDLED_PROFILE_ID
+          && known.has(wanted)
+          ? wanted
+          : current;
+      }
+      return wanted !== undefined && known.has(wanted) ? wanted : BUNDLED_PROFILE_ID;
+    }
+
+    /**
+     * Which write path the Save action takes. The resolved profile must be the
+     * selected id: a fallback profile rendered after a roster reload must never
+     * be saved under another id (the 0.8.0 default-profile bug: selectedId was
+     * the host's foreign "standard" id while selectedProfile fell back to the
+     * bundled profile, so the bundled save never ran).
+     * @returns 'bundled' | 'create' | 'custom' | 'invalid'
+     */
+    function profileSaveMode(selectedId, selectedProfile) {
+      if (selectedId === NEW_PROFILE_SENTINEL) return 'create';
+      if (!selectedProfile || selectedProfile.id !== selectedId) return 'invalid';
+      if (selectedProfile.kind === 'bundled') return 'bundled';
+      return typeof selectedProfile.revision === 'string' && selectedProfile.revision.length > 0
+        ? 'custom'
+        : 'invalid';
     }
 
     /**
@@ -704,6 +753,22 @@ window.__ModuleLoader__.load({
       const message = String(error?.message ?? '').toLowerCase();
       if (code.includes('conflict') || code === '409' || message.includes('conflict') || message.includes('already exists')) return 'conflict';
       return 'save';
+    }
+
+    /**
+     * One settings-namespace write. DSH 0.2.x resolves false when the host
+     * refuses a write (revision conflict or validation); 0.1.5 resolved
+     * undefined on success, so only an explicit false is a rejection. A thrown
+     * transport error is also a failure. Exported for unit tests.
+     * @returns {Promise<{ok: true} | {ok: false, reason: 'conflict'|'error', error?: unknown}>}
+     */
+    async function writeSettings(scope, writeOps, revision) {
+      try {
+        const result = await scope.mutate(writeOps, revision);
+        return result === false ? { ok: false, reason: 'conflict' } : { ok: true };
+      } catch (error) {
+        return { ok: false, reason: 'error', error };
+      }
     }
 
     // ------------------------------------------------------------ components
@@ -968,23 +1033,40 @@ window.__ModuleLoader__.load({
         return () => { alive = false; };
       }, [profileAdapter, base]);
 
+      // A roster reload can drop the selected custom profile (or leave a stale
+      // id from a host default this card does not own). Never edit a fallback
+      // profile under a stale id: reset to a valid selection and drop the old
+      // edits, which belonged to the profile that disappeared.
+      React.useEffect(() => {
+        if (selectionInRoster(selectedId, roster)) return;
+        setDraft(undefined);
+        setProfileError(undefined);
+        setPendingSwitch(undefined);
+        setSelectedId(resolveInitialSelection(selectedId, roster));
+      }, [roster, selectedId]);
+
       // The profile object currently edited: roster entry, or the sentinel draft.
       const selectedProfile = selectedId === NEW_PROFILE_SENTINEL
         ? newDraft
         : roster.profiles.find((profile) => profile.id === selectedId) ?? roster.profiles[0];
-      const isBundled = selectedId === BUNDLED_PROFILE_ID && selectedProfile?.kind === 'bundled';
+      // Writes are gated by an invariant: the resolved profile must be the
+      // selected id. Display may fall back to the first roster entry while a
+      // reconciliation is pending, but that fallback is never saved under a
+      // different id.
+      const saveMode = profileSaveMode(selectedId, selectedProfile);
+      const isBundledProfile = selectedProfile?.kind === 'bundled';
       // The RESOLVED configuration the editor renders: settings snapshot for
       // the bundled profile, base ⊕ profile.json for custom profiles, and the
       // frozen copy-of-current for the new-profile draft.
-      const editEffective = isBundled
+      const editEffective = isBundledProfile
         ? effective
         : selectedId === NEW_PROFILE_SENTINEL
           ? (newDraft?.sourceConfig ?? base)
           : mergeProfileConfig(base, selectedProfile?.config ?? {});
       const current = draft ?? buildDraft(editEffective, editEffective?.advanced, base);
       const baseline = buildDraft(editEffective, editEffective?.advanced, base);
-      const ops = isBundled && draft !== undefined ? planUserOps(base, user, draft) : [];
-      const dirty = isBundled
+      const ops = isBundledProfile && draft !== undefined ? planUserOps(base, user, draft) : [];
+      const dirty = isBundledProfile
         ? ops.length > 0
         : draft !== undefined && !deepEqualJson(draft, baseline);
       const invalid = ROLE_IDS.some((roleId) => {
@@ -1008,14 +1090,20 @@ window.__ModuleLoader__.load({
       };
       const run = async (writeOps, doneText) => {
         setSaving(true);
+        setProfileError(undefined);
         try {
           // DSH 0.1.2 settings scope: set/unset are top-level fields only;
           // multi-level paths (presets.<preset>.<role>.<field>) go through
           // one atomic mutate(ops) — the documented replacement for the
           // 0.1.1 per-op scope.write (which is gone).
-          await scope.mutate(writeOps, snap.revision);
+          const result = await writeSettings(scope, writeOps, snap.revision);
+          if (!result.ok) {
+            setProfileError(t(result.reason === 'conflict' ? 'profileConflict' : 'profileSaveFailed'));
+            return false;
+          }
           setDraft(undefined);
           setToast({ text: doneText, icon: renderIcon(ui, ICON_CHECK, { size: 14 }) });
+          return true;
         } finally {
           setSaving(false);
         }
@@ -1068,12 +1156,12 @@ window.__ModuleLoader__.load({
       // dialog; the create RPC itself is confirmed from the dialog.
       const save = () => {
         if (!dirty || invalid || saving) return;
-        if (isBundled) { void run(ops, t('saved')); return; }
-        if (selectedId === NEW_PROFILE_SENTINEL) {
+        if (saveMode === 'bundled') { void run(ops, t('saved')); return; }
+        if (saveMode === 'create') {
           setNameModal({ open: true, input: '', error: undefined });
           return;
         }
-        if (!selectedProfile || !selectedProfile.revision) {
+        if (saveMode !== 'custom' || !selectedProfile) {
           setProfileError(t('profileSaveFailed'));
           return;
         }
@@ -1201,14 +1289,17 @@ window.__ModuleLoader__.load({
       // hides — both would stack on screen otherwise.
       const guard = pendingSwitch !== undefined && !nameModal.open;
       const confirmGuardSave = async () => {
-        if (isBundled) {
-          await run(ops, t('saved'));
-        } else if (selectedId === NEW_PROFILE_SENTINEL) {
+        if (saveMode === 'bundled') {
+          if (!(await run(ops, t('saved')))) return;
+        } else if (saveMode === 'create') {
           setNameModal({ open: true, input: '', error: undefined });
           return; // confirmCreate performs the switch
-        } else if (selectedProfile) {
+        } else if (saveMode === 'custom' && selectedProfile) {
           const ok = await saveCustom(selectedProfile, draftToConfig(draft, selectedProfile.config, defaultsBaseline));
           if (!ok) return;
+        } else {
+          setProfileError(t('profileSaveFailed'));
+          return;
         }
         const next = pendingSwitch;
         setPendingSwitch(undefined);
@@ -1222,7 +1313,7 @@ window.__ModuleLoader__.load({
 
       const reset = async () => {
         setConfirmReset(false);
-        if (isBundled) {
+        if (isBundledProfile) {
           const resetDraft = buildDraft(base, base?.advanced, base);
           const resetOps = planUserOps(base, user, resetDraft);
           if (resetOps.length === 0) { setDraft(undefined); return; }
@@ -1255,6 +1346,12 @@ window.__ModuleLoader__.load({
         React.createElement('span', { style: { display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 } },
           React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } },
             React.createElement('span', { style: { fontSize: 15, fontWeight: 600, lineHeight: '1.4', color: color.text } }, 'oh-my-dsh-slim'),
+            React.createElement('span', {
+              style: {
+                fontSize: 11, lineHeight: '16px', padding: '1px 6px', borderRadius: 999,
+                border: `1px solid ${color.border}`, color: color.tertiary, flex: 'none',
+              },
+            }, `v${VERSION}`),
             !cardOpen && dirty ? renderIcon(ui, ICON_WARNING, { size: 14 }) : null,
           ),
           React.createElement('span', { style: { fontSize: 13, lineHeight: '1.5', color: color.tertiary } }, t('desc')),
@@ -1470,6 +1567,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.name = name;
+    exports.VERSION = VERSION;
     exports.inject = inject;
     exports.apply = apply;
     exports.REQUIRED_PRIMITIVES = REQUIRED_PRIMITIVES;
@@ -1489,6 +1587,9 @@ window.__ModuleLoader__.load({
     exports.ProfileSelect = ProfileSelect;
     exports.canSetDefault = canSetDefault;
     exports.resolveInitialSelection = resolveInitialSelection;
+    exports.selectionInRoster = selectionInRoster;
+    exports.profileSaveMode = profileSaveMode;
+    exports.writeSettings = writeSettings;
     return module.exports;
   },
 });

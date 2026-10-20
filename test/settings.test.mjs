@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -31,10 +31,29 @@ test('Config resolves host schema before apply without profile-local duplicates'
   const schema = {};
   const calls = [];
   assert.equal(await loadHostSchema({ hostBase: 'file:///C:/host/resources/app.asar/dsh/node_modules/x/y.js', resolve(base, name) { calls.push([base, name]); return 'C:/host/schema.mjs'; }, importModule: async () => ({ default: schema }) }), schema);
+  assert.equal(calls[0][0], 'file:///C:/host/resources/app.asar/dsh/node_modules/x/y.js', 'a packaged host file: base is passed through unchanged');
   assert.equal(calls[0][1], '@deepseek-ai/schemastery');
   let imports = 0;
   assert.equal(await loadHostSchema({ hostBase: 'file:///C:/host/entry.js', resolve() { throw new Error('missing'); }, importModule: async () => { imports++; } }), undefined);
   assert.equal(imports, 0, 'a failed host resolution cannot silently fall back to stale profile peer');
+});
+
+test('Config follows a symlinked npm-global entry to the host schema', { skip: process.platform === 'win32' ? 'symlink creation requires privileges on Windows' : false }, async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'omds-host-anchor-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const realEntry = join(dir, 'real', 'lib', 'bin.js');
+  mkdirSync(join(dir, 'real', 'lib'), { recursive: true });
+  writeFileSync(realEntry, '');
+  const schemaDir = join(dir, 'real', 'node_modules', '@deepseek-ai', 'schemastery');
+  mkdirSync(schemaDir, { recursive: true });
+  writeFileSync(join(schemaDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/schemastery', version: '1.0.0', type: 'module', main: 'index.js' }));
+  writeFileSync(join(schemaDir, 'index.js'), 'export default { fixture: "symlinked-host" };\n');
+  mkdirSync(join(dir, 'bin'), { recursive: true });
+  const link = join(dir, 'bin', 'dsh');
+  symlinkSync(realEntry, link);
+
+  const z = await loadHostSchema({ entry: link });
+  assert.equal(z?.fixture, 'symlinked-host', 'the real link target, not /bin, is the resolution anchor');
 });
 
 test('modern descriptor values read live and are detached', () => {

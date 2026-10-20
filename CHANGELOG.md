@@ -4,6 +4,42 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.1] — CLI settings visibility and default-profile saves
+
+Patch release for the two regressions reported against 0.8.0 on DSH
+0.2.1-rc.2, plus a settings-card version badge.
+
+- **The settings page appears on npm-global CLI hosts again.** `loadHostSchema`
+  used `process.argv[1]` directly as the `createRequire` anchor; an npm-global
+  `dsh` is a symlink, so the host's `@deepseek-ai/schemastery` was never found,
+  `Config` became `undefined`, and the host silently dropped the namespace
+  (the card's `whileServed` guard never registered it). The anchor now
+  resolves the real path for path entries and keeps a packaged host's `file:`
+  base untouched. A failed anchored resolution still never falls back to a
+  profile-local copy.
+- **The default delegation configuration can be edited.** The host's native
+  default preset is `standard` (dsh-base), which is not one of this package's
+  profiles. The card used that id as its dropdown selection while the editor
+  fell back to the bundled profile, so Save took the custom-profile branch and
+  failed with `profileSaveFailed`. `normalizeProfileRoster` now only reports
+  known ids, `resolveInitialSelection` validates both the current and wanted
+  selections against the roster, and `profileSaveMode` requires the resolved
+  profile to be the selected id. A roster reconciliation effect drops edits
+  that belonged to a profile which disappeared.
+- **Rejected settings writes are visible.** DSH 0.2.x resolves
+  `ConfigForm.mutate()` with `false` on a rejected revision (0.1.5 resolved
+  `undefined` on success); the bundled save path now treats only an explicit
+  `false` as a conflict, catches transport errors, keeps the draft, and no
+  longer reports "saved" for a write the host refused.
+- **Version badge.** The settings card header shows `v0.8.1`; `T0` and the
+  client-card test compare the literal with `package.json` so a release bump
+  cannot leave the badge stale.
+- **Verification.** 140/140 unit/integration tests on 0.2.0-rc.2 and
+  0.2.1-rc.2; base, role-composition, council, cold-resume and real-role-row
+  smokes on both lines; web-host smoke in normal and npm-global symlink modes
+  on both lines, including bundled settings save and restart persistence.
+  `T0` and the host-row audit pass.
+
 ## [0.8.0] — Council: multi-model seats and a tool-less synthesizer
 
 omo-s Council arrives as a fixed three-seat roster plus one synthesis-only

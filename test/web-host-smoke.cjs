@@ -9,6 +9,20 @@ const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const anchor = process.env.DSH_HOST_ANCHOR;
 if (!anchor || !path.isAbsolute(anchor)) throw Error('Set DSH_HOST_ANCHOR to an absolute installed host JS entry');
+// Real npm-global CLI installs put a symlink in bin/; exercise that shape by
+// pointing argv[1] at a link while importing the host through the real entry.
+// An asar target cannot be realpath'd outside Electron, so this mode requires
+// a plain Node host (the release gate runs it against the installed prefix).
+let anchorLinkDir;
+if (process.env.OMDS_SYMLINK_ANCHOR === '1') {
+  if (anchor.split(path.sep).join('/').includes('/app.asar/')) throw Error('OMDS_SYMLINK_ANCHOR requires a plain Node host anchor, not an asar path');
+  anchorLinkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omds-anchor-link-'));
+  const link = path.join(anchorLinkDir, 'dsh');
+  fs.symlinkSync(anchor, link);
+  process.argv[1] = link;
+} else {
+  process.argv[1] = anchor;
+}
 const requireHost = createRequire(anchor);
 const hostImport = name => import(pathToFileURL(requireHost.resolve(name)).href);
 const hostBase = pathToFileURL(anchor).href;
@@ -17,7 +31,6 @@ process.env.DSH_HOME = path.join(temporary, 'home');
 fs.mkdirSync(process.env.DSH_HOME);
 delete process.env.DSH_PROFILE;
 delete process.env.OH_MY_DSH_SLIM_CONFIG;
-process.argv[1] = anchor;
 let ctx;
 let port;
 let cookie;
@@ -134,6 +147,21 @@ async function rpc(method, payload = {}) {
     cookie = exchange.headers['set-cookie'][0].split(';')[0];
     console.log('WEB_AUTH_FENCE_PASS');
     const listed = await rpc('profile-list'); assert.equal(listed.ok, true); assert.ok(listed.value.profiles.some(p => p.id === 'oh-my-dsh-slim'));
+    // A fresh host's default is a NATIVE agent preset (dsh-web-app ships
+    // "standard"), which is not one of this package's profiles. The card must
+    // not turn that id into a selection; the host endpoint still reports it raw.
+    const freshDefault = listed.value.defaultProfileId;
+    assert.equal(typeof freshDefault, 'string');
+    assert.equal(listed.value.profiles.some(profile => profile.id === freshDefault), false,
+      'fresh host default must be a native preset outside this roster (' + freshDefault + ')');
+    const settings = ctx.get('settings');
+    const settingsRow = settings.describe().find(row => row.ns === 'oh-my-dsh-slim');
+    assert.ok(settingsRow, 'oh-my-dsh-slim settings namespace must be served');
+    const bundledPreset = settingsRow.value.preset;
+    await settings.mutate('oh-my-dsh-slim', [{ op: 'set', path: ['presets', bundledPreset, 'oracle', 'model'], value: 'smoke-bundled-save' }], settingsRow.revision);
+    const bundledAfter = settings.describe().find(row => row.ns === 'oh-my-dsh-slim');
+    assert.equal(bundledAfter.value.presets[bundledPreset].oracle.model, 'smoke-bundled-save');
+    console.log('WEB_BUNDLED_SETTINGS_SAVE_PASS');
     const created = await rpc('profile-create', { displayName: 'HTTP Named A', config: { roles: { oracle: { model: 'http-a', effort: 'none' } } } }); assert.equal(created.ok, true);
     const first = created.value;
     const saved = await rpc('profile-save', { id: first.id, expectedRevision: first.revision, config: { roles: { oracle: { model: 'http-saved' } } } }); assert.equal(saved.ok, true);
@@ -155,6 +183,10 @@ async function rpc(method, payload = {}) {
     const restartUrl = new URL(ctx.get('connection').authenticatedUrl(`http://127.0.0.1:${port}/`));
     const nextExchange = await request(restartUrl.pathname + restartUrl.search, { method: 'GET' }); assert.equal(nextExchange.status, 303); cookie = nextExchange.headers['set-cookie'][0].split(';')[0];
     const persisted = await rpc('profile-list'); assert.equal(persisted.ok, true); assert.equal(persisted.value.defaultProfileId, first.id); assert.equal(persisted.value.profiles.find(p => p.id === first.id).revision, saved.value.revision);
+    const bundledRestart = ctx.get('settings').describe().find(row => row.ns === 'oh-my-dsh-slim');
+    assert.ok(bundledRestart, 'oh-my-dsh-slim settings namespace survives restart');
+    assert.equal(bundledRestart.value.presets[bundledRestart.value.preset].oracle.model, 'smoke-bundled-save');
+    console.log('WEB_BUNDLED_SETTINGS_RESTART_PASS');
     console.log('WEB_PROFILE_HTTP_RESTART_PASS');
     const owner = [...ctx.get('loader').entries()].find(entry => entry.options.id === 'oh-my-dsh-slim');
     assert.ok(owner?.fiber, 'companion owner fiber unavailable'); await owner.fiber.dispose();
@@ -162,6 +194,10 @@ async function rpc(method, payload = {}) {
     console.log('WEB_OMDS_ROUTE_DISPOSAL_PASS');
   } finally {
     if (ctx) await ctx.fiber.dispose();
+    if (anchorLinkDir !== undefined) {
+      assert.ok(path.basename(anchorLinkDir).startsWith('omds-anchor-link-'));
+      fs.rmSync(anchorLinkDir, { recursive: true, force: true });
+    }
     // The fixture contains physical copies only: never create junctions/symlinks.
     // Verify the deletion root is the freshly-created temp-directory family.
     assert.equal(path.dirname(path.resolve(temporary)), path.resolve(os.tmpdir()));

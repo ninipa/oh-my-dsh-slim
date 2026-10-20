@@ -54,6 +54,14 @@ test('native default uses selectedDefault mutation revision', async () => {
   assert.equal(registry.defaultId, a.id);
   assert.equal((await endpoints.list()).defaultProfileId, a.id);
 });
+test('native default outside this roster is reported raw and marks no profile', async () => {
+  const { endpoints, registry } = fixture();
+  registry.defaultId = 'standard';
+  const list = await endpoints.list();
+  assert.equal(list.defaultProfileId, 'standard');
+  assert.equal(list.profiles.find(profile => profile.id === 'oh-my-dsh-slim').isDefaultForNewSessions, false);
+  assert.equal(list.profiles.every(profile => profile.isDefaultForNewSessions === false), true);
+});
 test('none does not reach stock child preflight and restrictions exclude unknown/local names', async () => {
   const { endpoints, context } = fixture();
   const a = await endpoints.create({ displayName: 'None', config: { roles: { oracle: { effort: 'none' } } } });

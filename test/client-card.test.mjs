@@ -51,6 +51,8 @@ function materialize({ primitives }) {
 console.log('\n[export face]');
 const { exports: card } = materialize({ primitives: makePrimitives() });
 check(card.name === 'oh-my-dsh-slim', `name matches the package id (${card.name})`);
+const rootVersion = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version;
+check(card.VERSION === rootVersion, `card header version matches package.json (${card.VERSION})`);
 check(Array.isArray(card.inject) && ['slots', 'locale', 'connection'].every((s) => card.inject.includes(s)),
   `inject declares slots/locale/connection: ${JSON.stringify(card.inject)}`);
 check(typeof card.apply === 'function', 'apply exported');
@@ -335,6 +337,19 @@ console.log('\n[profile roster]');
 
   const fallback = card.normalizeProfileRoster({ preset: 'p' }, undefined);
   check(fallback.profiles.length === 1 && fallback.profiles[0].isDefaultForNewSessions === true, 'no payload → bundled-only roster');
+
+  // dsh-base ships the native default "standard"; it is not one of this
+  // package's profiles. Marking the bundled profile as default in that case
+  // would both misstate the setting and select the wrong editor target.
+  const foreign = card.normalizeProfileRoster({ preset: 'p' }, {
+    defaultProfileId: 'standard',
+    profiles: [
+      { id: 'oh-my-dsh-slim', displayName: 'Minimal Role Delegation', isDefaultForNewSessions: false },
+      { id: 'profile-x', displayName: 'X', isDefaultForNewSessions: false, revision: 'r1' },
+    ],
+  });
+  check(foreign.defaultProfileId === undefined, 'foreign native default is not reported as one of this roster’s profiles');
+  check(foreign.profiles.every((entry) => entry.isDefaultForNewSessions === false), 'foreign native default marks no profile as default');
 }
 
 console.log('\n[mergeProfileConfig]');
@@ -495,14 +510,52 @@ console.log('\n[default action + initial selection]');
   check(card.canSetDefault({ kind: 'draft', isDefaultForNewSessions: false }) === false, 'new-profile draft → no action (nothing exists yet)');
   check(card.canSetDefault(undefined) === false, 'no profile → no action');
 
-  check(card.resolveInitialSelection('oh-my-dsh-slim', { defaultProfileId: 'profile-x' }) === 'profile-x',
-    'roster loaded → dropdown opens on the new-session default');
-  check(card.resolveInitialSelection('oh-my-dsh-slim', { defaultProfileId: 'oh-my-dsh-slim' }) === 'oh-my-dsh-slim',
+  const bundled = { id: 'oh-my-dsh-slim', kind: 'bundled' };
+  const a = { id: 'profile-a', kind: 'custom', revision: 'r1' };
+  const b = { id: 'profile-b', kind: 'custom', revision: 'r1' };
+  const roster = (profiles, defaultProfileId) => ({ profiles, defaultProfileId });
+
+  check(card.resolveInitialSelection('oh-my-dsh-slim', roster([bundled, a], 'profile-a')) === 'profile-a',
+    'roster loaded → dropdown opens on the known new-session default');
+  check(card.resolveInitialSelection('oh-my-dsh-slim', roster([bundled, a], 'standard')) === 'oh-my-dsh-slim',
+    'foreign native default (standard) never becomes a selection');
+  check(card.resolveInitialSelection('oh-my-dsh-slim', roster([bundled], 'oh-my-dsh-slim')) === 'oh-my-dsh-slim',
     'bundled default → stays on the bundled profile');
-  check(card.resolveInitialSelection('profile-x', { defaultProfileId: 'profile-y' }) === 'profile-x',
+  check(card.resolveInitialSelection('profile-a', roster([bundled, a, b], 'profile-b')) === 'profile-a',
     'manual selection is never overridden by the default');
+  check(card.resolveInitialSelection('standard', roster([bundled, a], 'profile-a')) === 'profile-a',
+    'stale foreign current heals to the known default');
+  check(card.resolveInitialSelection('profile-gone', roster([bundled, a], undefined)) === 'oh-my-dsh-slim',
+    'removed custom profile falls back to bundled');
+  check(card.resolveInitialSelection('__new__', roster([bundled, a], 'profile-a')) === '__new__',
+    'new-profile draft is never replaced');
   check(card.resolveInitialSelection('oh-my-dsh-slim', undefined) === 'oh-my-dsh-slim',
     'unknown roster → bundled fallback (no default data)');
+  check(card.selectionInRoster('profile-a', roster([bundled, a])) === true, 'selectionInRoster accepts a roster profile');
+  check(card.selectionInRoster('standard', roster([bundled, a])) === false, 'selectionInRoster rejects a foreign id');
+  check(card.selectionInRoster('__new__', roster([bundled])) === true, 'selectionInRoster keeps the draft sentinel');
+}
+
+console.log('\n[profile save mode]');
+{
+  check(card.profileSaveMode('oh-my-dsh-slim', { id: 'oh-my-dsh-slim', kind: 'bundled' }) === 'bundled', 'bundled save mode');
+  check(card.profileSaveMode('profile-a', { id: 'profile-a', kind: 'custom', revision: 'r1' }) === 'custom', 'custom save mode requires a revision');
+  check(card.profileSaveMode('profile-a', { id: 'profile-a', kind: 'custom' }) === 'invalid', 'custom without revision is invalid');
+  check(card.profileSaveMode('__new__', { id: '__new__', kind: 'draft' }) === 'create', 'draft opens the naming dialog');
+  check(card.profileSaveMode('standard', { id: 'oh-my-dsh-slim', kind: 'bundled' }) === 'invalid', 'fallback profile saved under a foreign id is invalid (the 0.8.0 bug)');
+  check(card.profileSaveMode('profile-a', undefined) === 'invalid', 'missing profile is invalid');
+}
+
+console.log('\n[settings write result]');
+{
+  const ok = await card.writeSettings({ mutate: async () => true }, [], 1);
+  check(ok.ok === true, 'mutate true → success');
+  const legacyOk = await card.writeSettings({ mutate: async () => undefined }, [], 1);
+  check(legacyOk.ok === true, 'mutate undefined (0.1.5 success) → success');
+  const conflict = await card.writeSettings({ mutate: async () => false }, [], 1);
+  check(conflict.ok === false && conflict.reason === 'conflict', 'mutate false → conflict, not success');
+  const thrown = await card.writeSettings({ mutate: async () => { throw new Error('transport'); } }, [], 1);
+  check(thrown.ok === false && thrown.reason === 'error', 'thrown transport error → save failure');
 }
 
 console.log('\n[model-scoped effort options (flash+medium regression)]');
@@ -588,34 +641,56 @@ console.log('\n[rc.2 contract + baseline preservation]');
   check(events.disposers?.length === 1, 'whileServed lifecycle disposer is owned by ctx.effect');
   events.disposers?.forEach((dispose) => dispose());
   check(events.disposed === true, 'disposing the client removes its whileServed registration');
-  check(source.includes('await scope.mutate(writeOps, snap.revision);'), 'bundled settings writes pass the rc.2 revision fence');
+  check(source.includes('writeSettings(scope, writeOps, snap.revision)'), 'bundled settings writes pass the rc.2 revision fence');
+  check(source.includes('result === false'), 'a rejected write is surfaced instead of reported as saved');
   const legacy = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'legacy', 'v0.5.3', 'npm-package', 'client', 'client.js'), 'utf8');
   // The 0.8.0 council UI intentionally changes RoleRow and the card layout, so
   // the historical byte comparison covers the pure helpers (write planner,
   // draft builder, profile serialization) up to RoleRow; the card itself is
   // exercised by the behavioral checks in this file.
   const helperRegion = (text) => text.slice(text.indexOf('    function parseAdvancedNumber'), text.indexOf('    function RoleRow(')).replaceAll('\r\n', '\n');
-  // Whole-function substitution for the one helper whose 0.8.0 change is
-  // intentional (base inheritance for missing roles). Field-level replaces
-  // would also eat the same identifiers in mergeProfileConfig.
-  const extractBuildDraft = (text) => {
-    const at = text.indexOf('function buildDraft(');
+  // Whole-function substitution for helpers whose changes are intentional.
+  // Field-level replaces would also eat the same identifiers elsewhere.
+  const extractHelper = (text, name) => {
+    const at = text.indexOf(`function ${name}(`);
+    if (at < 0) return undefined;
     const comment = text.lastIndexOf('/**', at);
-    return text.slice(comment, text.indexOf('\n    }\n', at) + '\n    }\n'.length);
+    const start = comment >= 0 && text.slice(comment, at).includes('*/') ? comment : at;
+    const end = text.indexOf('\n    }\n', at);
+    return end < 0 ? undefined : text.slice(start, end + '\n    }\n'.length);
   };
-  const currentBuildDraft = extractBuildDraft(source);
-  const legacyBuildDraft = extractBuildDraft(legacy);
+  const currentBuildDraft = extractHelper(source, 'buildDraft');
+  const legacyBuildDraft = extractHelper(legacy, 'buildDraft');
   const derivedSkip = "          // council.enabled is derived from the seats; never write it.\n          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n";
   const derivedTextOps = "        for (const field of ADVANCED_TEXT_FIELDS) {\n          const path = ['advanced', 'roles', roleId, field];\n          const dv = d[field];\n          const uv = getPath(user, path);\n          if (dv === undefined || dv === '') {\n            if (uv !== undefined) ops.push({ op: 'unset', path });\n          } else if (!deepEqualJson(uv, dv)) {\n            ops.push({ op: 'set', path, value: dv });\n          }\n        }\n";
   const derivedTextAdvanced = "        for (const field of ADVANCED_TEXT_FIELDS) {\n          const value = role[field];\n          if (value === undefined || value === '' || deepEqualJson(value, baseRole[field])) continue;\n          advanced[field] = value;\n        }\n";
-  const normalize = (text) => text
-    .replaceAll('await scope.mutate(writeOps, snap.revision);', 'await scope.mutate(writeOps);')
-    // 0.2 primitives renamed the icon exports; the card resolves them at runtime.
-    .replaceAll('renderIcon(ui, ICON_WARNING, { size: 14 })', 'React.createElement(ui.IconWarningOutline16, { size: 14 })')
-    .replaceAll('renderIcon(ui, ICON_CHECK, { size: 14 })', 'React.createElement(ui.IconCheckOutline16, { size: 14 })')
-    .replaceAll('renderIcon(ui, ICON_CHEVRON, ', 'React.createElement(ui.IconChevronDownOutline14, ')
-    // 0.2 renders the card as a settings page; it opens expanded by default.
-    .replaceAll(
+  const normalize = (text) => {
+    let out = text;
+    // New profile-selection/write helpers have no legacy counterpart.
+    for (const name of ['selectionInRoster', 'profileSaveMode', 'writeSettings']) {
+      const block = extractHelper(out, name);
+      if (block === undefined) continue;
+      const before = out;
+      // Drop the block together with its surrounding blank line/indent so the
+      // historical comparison sees the two neighbouring helpers adjacent.
+      out = out.replace(`\n\n    ${block}\n`, '\n\n');
+      if (out === before) out = out.replace(block, '');
+    }
+    // The default-profile selection now rejects ids outside the roster, and
+    // profileSaveMode replaces the old inline bundled/custom branch.
+    for (const name of ['normalizeProfileRoster', 'resolveInitialSelection']) {
+      const current = extractHelper(out, name);
+      const previous = extractHelper(legacy, name);
+      if (current !== undefined && previous !== undefined) out = out.replace(current, previous);
+    }
+    return out
+      .replaceAll('await scope.mutate(writeOps, snap.revision);', 'await scope.mutate(writeOps);')
+      // 0.2 primitives renamed the icon exports; the card resolves them at runtime.
+      .replaceAll('renderIcon(ui, ICON_WARNING, { size: 14 })', 'React.createElement(ui.IconWarningOutline16, { size: 14 })')
+      .replaceAll('renderIcon(ui, ICON_CHECK, { size: 14 })', 'React.createElement(ui.IconCheckOutline16, { size: 14 })')
+      .replaceAll('renderIcon(ui, ICON_CHEVRON, ', 'React.createElement(ui.IconChevronDownOutline14, ')
+      // 0.2 renders the card as a settings page; it opens expanded by default.
+      .replaceAll(
       [
         "      // Expanded by default: on DSH 0.2 the card is a settings page (the",
         "      // `settings.section` slot), so the content should be visible on entry",
@@ -628,9 +703,9 @@ console.log('\n[rc.2 contract + baseline preservation]');
         "      // host-provided disclosure wrapper, so the card draws its own.",
         "      const [cardOpen, setCardOpen] = React.useState(false);",
       ].join('\n'),
-    )
-    // 0.2 provides no nested `remote.session` service; the card probes it defensively.
-    .replaceAll(
+      )
+      // 0.2 provides no nested `remote.session` service; the card probes it defensively.
+      .replaceAll(
       [
         "        // Reading `remote.session` on a host that does not provide that nested",
         "        // service throws inside cordis (the traceable proxy resolves nested",
@@ -655,19 +730,20 @@ console.log('\n[rc.2 contract + baseline preservation]');
         "        }",
         "        Promise.resolve(remote.session.modelCatalog()).then((response) => {",
       ].join('\n'),
-    )
-    // 0.8.0 makes the editor inherit missing roles from the shipped base (so a
-    // release that adds roles cannot silently enable them) and derives the
-    // council synthesizer's enabled bit from its seats. Normalize those
-    // intentional changes back to the legacy text before comparing.
-    .replaceAll(currentBuildDraft, legacyBuildDraft)
-    .replaceAll(derivedSkip, '')
-    .replaceAll("          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n", '')
-    .replaceAll(derivedTextOps, '')
-    .replaceAll(derivedTextAdvanced, '')
-    .replaceAll('buildDraft(effective, effective?.advanced, baseline ?? config)', 'buildDraft(effective, effective?.advanced)')
-    .replaceAll('buildDraft(editEffective, editEffective?.advanced, base)', 'buildDraft(editEffective, editEffective?.advanced)')
-    .replaceAll('buildDraft(base, base?.advanced, base)', 'buildDraft(base, base?.advanced)');
+      )
+      // 0.8.0 makes the editor inherit missing roles from the shipped base (so a
+      // release that adds roles cannot silently enable them) and derives the
+      // council synthesizer's enabled bit from its seats. Normalize those
+      // intentional changes back to the legacy text before comparing.
+      .replaceAll(currentBuildDraft, legacyBuildDraft)
+      .replaceAll(derivedSkip, '')
+      .replaceAll("          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n", '')
+      .replaceAll(derivedTextOps, '')
+      .replaceAll(derivedTextAdvanced, '')
+      .replaceAll('buildDraft(effective, effective?.advanced, baseline ?? config)', 'buildDraft(effective, effective?.advanced)')
+      .replaceAll('buildDraft(editEffective, editEffective?.advanced, base)', 'buildDraft(editEffective, editEffective?.advanced)')
+      .replaceAll('buildDraft(base, base?.advanced, base)', 'buildDraft(base, base?.advanced)');
+  };
   check(normalize(helperRegion(source)) === normalize(helperRegion(legacy)), 'historical helpers and complete card behavior are preserved apart from the rc.2 revision argument and the icon-name adaptation');
   for (const [manifestPath, expectedClient] of [['package.json', './npm-package/client/client.js'], ['npm-package/package.json', './client/client.js']]) {
     const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', manifestPath), 'utf8'));

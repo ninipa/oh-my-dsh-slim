@@ -16,7 +16,8 @@ be run against it.
 | Council smoke | `DSH_HOST_ANCHOR=… node --expose-internals test/council-smoke.cjs` | real host + production `role-composition`/`council-mode` rows: seat tools are exactly read/glob/grep, the synthesizer child has zero tools, two seats start in one dispatch step, Council Mode appears only for the top-level agent and only with >= 2 visible seats + synthesizer | 0 |
 | Real role-row smoke | `DSH_HOST_ANCHOR=… node --expose-internals test/real-role-row-smoke.cjs` | mount the production role row (not a stand-in), call its tool, and assert the wrapper label reaches the child, the seat persona applies and the child tools are exactly read/glob/grep; also exercises the fail-closed path when a registration is not intercepted | 0 |
 | Council cold-resume smoke | `DSH_HOST_ANCHOR=… node --expose-internals test/council-resume-smoke.cjs` | restart the host and resume a persisted seat child: identity resolves from the label and the read-only filter reapplies | 0 |
-| Web host smoke | `DSH_HOST_ANCHOR=… node --expose-internals test/web-host-smoke.cjs` | real `dsh-base` + `dsh-web-app` composition over loopback HTTP: auth fence, all five `/omds` profile methods, envelope validation, restart persistence, route disposal, the plane split (host `tool-web` stays off) and the preset row's effective `web_search`/`web_fetch` | 0 models |
+| Web host smoke | `DSH_HOST_ANCHOR=… node --expose-internals test/web-host-smoke.cjs` | real `dsh-base` + `dsh-web-app` composition over loopback HTTP: auth fence, all five `/omds` profile methods, envelope validation, the fresh native default being outside this package's roster, bundled settings save + restart persistence, route disposal, the plane split (host `tool-web` stays off) and the preset row's effective `web_search`/`web_fetch` | 0 models |
+| Web host smoke, symlink anchor | `OMDS_SYMLINK_ANCHOR=1 DSH_HOST_ANCHOR=<plain Node host>/lib/bin.js node --expose-internals test/web-host-smoke.cjs` | the same composition with `process.argv[1]` pointing at a symlink to the host entry (npm-global `bin/dsh` layout): asserts the `oh-my-dsh-slim` settings namespace is served and the bundled save still works | 0 models |
 | Declarative host probe | see below | what the running host actually exposes: roster/broken, settings entry, client-module source count | 0 models |
 | Real model run | not part of this line yet | provider/MCP E2E | needs credentials |
 
@@ -31,6 +32,12 @@ Notes:
   `$TMPDIR/node_modules/@deepseek-ai` link as the base smoke — point it at the host line under test.
 - Run every smoke once per supported line (`0.2.0-rc.2` and `0.2.1-rc.2`); the role smoke is the one
   that exercises the 0.7.0 runtime channel end to end.
+- `OMDS_SYMLINK_ANCHOR=1` reproduces an npm-global CLI install by pointing `process.argv[1]` at a
+  symlink to `DSH_HOST_ANCHOR`. It requires a **plain Node host** anchor: an `app.asar` target cannot
+  be realpath'd outside Electron, so the mode refuses asar anchors explicitly. Run both the normal
+  and the symlink web smoke; the normal macOS desktop smoke does not cover the `file:` base branch
+  because `hostBaseUrl()`'s `/resources/app.asar/` marker does not match macOS's
+  `Contents/Resources` spelling (the unit suite asserts the `file:` base is passed through unchanged).
 - `legacy/v0.5.3/` must stay in the tree: `test/legacy-archive.test.mjs` reads it.
 
 Reference host for T0's audit, the suite, and both smokes:
@@ -39,6 +46,9 @@ Reference host for T0's audit, the suite, and both smokes:
 npm install --prefix /tmp/dsh-host @deepseek-ai/dsh@0.2.0-rc.2     # once
 export DSH_HOST_REFERENCE_DIR=/tmp/dsh-host/node_modules
 export DSH_HOST_ANCHOR=/tmp/dsh-host/node_modules/@deepseek-ai/dsh/lib/bin.js
+# Web smoke, normal and npm-global symlink shapes:
+node --expose-internals test/web-host-smoke.cjs
+OMDS_SYMLINK_ANCHOR=1 node --expose-internals test/web-host-smoke.cjs
 ```
 
 The audit alone reads only `@deepseek-ai/dsh-base` and `@deepseek-ai/dsh-web-app` (`cordis.patch.yml`

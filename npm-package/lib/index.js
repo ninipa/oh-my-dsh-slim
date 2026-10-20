@@ -77,7 +77,7 @@ export function apply(ctx, config) {
       } catch (error) { return { ok: false, error: { code: error?.code ?? 'PROFILE_FAILED', message: error?.message ?? String(error), details: {} } }; }
     });
   });
-  if (!Config) ctx.logger?.warn?.('oh-my-dsh-slim: host schemastery could not be resolved; native configuration form unavailable, legacy JSON remains active');
+  if (!Config) ctx.logger?.warn?.(`oh-my-dsh-slim: host schemastery could not be resolved from ${process.argv[1] ?? 'the host entry'}; native configuration form unavailable, legacy JSON remains active`);
   const presetId = typeof config?.presetId === 'string' && config.presetId.length > 0 ? config.presetId : PRESET_ID;
   const verbose = config?.verbose === true;
   report(ctx, `oh-my-dsh-slim: agent preset "${presetId}" is declared by this bundle (declarative preset; no directory is seeded)`);

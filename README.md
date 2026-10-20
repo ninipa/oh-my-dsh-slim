@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.0 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.1 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -94,7 +94,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.0
+oh-my-dsh-slim@0.8.1
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -104,7 +104,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.0
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.1
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules

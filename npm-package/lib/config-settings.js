@@ -1,6 +1,6 @@
 // DSH 0.2 settings are volatile Config fields on a profile entry, not namespaces
 // registered by a service. Keep this module independent of preset/config.js.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -12,12 +12,27 @@ const factoryDefaults = JSON.parse(readFileSync(new URL('../preset/defaults.json
 export const SETTINGS_NS = 'oh-my-dsh-slim';
 const readers = new Map();
 
+/** Turn a host entry path into the base URL createRequire resolves from.
+ * npm-global CLI installs expose dsh as a symlink (e.g.
+ * /usr/local/bin/dsh -> .../dsh/lib/bin.js); createRequire does not follow
+ * symlinks, so the link's own directory would be searched and the host's
+ * node_modules would never be found. Resolve the real path first.
+ * hostBase is already a packaged host's file: URL: it is authoritative and
+ * must never be converted again (pathToFileURL would nest "file:" in a path). */
+function anchorUrl(value) {
+  if (typeof value !== 'string' || value.length === 0) return undefined;
+  if (value.startsWith('file:')) return value;
+  let anchor = value;
+  try { anchor = realpathSync(anchor); } catch { /* keep the original anchor */ }
+  return pathToFileURL(anchor).href;
+}
+
 /** Config is consumed before apply(), so there is no loader context yet.
  * Resolve from the running host entry rather than the external plugin's
  * node_modules. Electron's Node resolver supports its own app.asar paths.
  * When a host anchor exists, never silently use a profile-local stale copy. */
 export async function loadHostSchema({ hostBase, entry = process.argv[1], resolve = (base, name) => createRequire(base).resolve(name), importModule = url => import(url) } = {}) {
-  const base = hostBase ?? (entry ? pathToFileURL(entry).href : undefined);
+  const base = hostBase !== undefined ? hostBase : anchorUrl(entry);
   if (base !== undefined) {
     try {
       const path = resolve(base, '@deepseek-ai/schemastery');

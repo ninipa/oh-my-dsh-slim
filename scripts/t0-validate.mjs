@@ -28,6 +28,8 @@ const pkgManifest = json('npm-package/package.json');
 check(rootManifest.name === 'oh-my-dsh-slim' && pkgManifest.name === 'oh-my-dsh-slim', 'both manifests name oh-my-dsh-slim');
 check(rootManifest.version === pkgManifest.version, `root and npm-package versions agree (${rootManifest.version})`);
 check(/^\d+\.\d+\.\d+$/.test(rootManifest.version), `release version carries no prerelease suffix (${rootManifest.version})`);
+const clientVersion = read('npm-package/client/client.js').match(/const VERSION = '([^']+)';/);
+check(clientVersion?.[1] === rootManifest.version, `client.js header version matches package.json (${clientVersion?.[1] ?? 'missing'})`);
 
 // ------------------------------------------------------------- export maps
 const ROOT_EXPORTS = { '.': 'npm-package/lib/index.js', './preset': 'npm-package/preset/preset.js', './profile-registry': 'npm-package/lib/profile-registry.js', './client': 'npm-package/client/client.js' };
