@@ -115,6 +115,30 @@ export function makeProfileEndpoints({ agentPresets, getSettings, getEditor }) {
       });
       return { id, displayName: finalName, revision: revisionForConfig(config) };
     },
+    // Deleting a profile only removes its record from this row's config dict:
+    // `edit` rewrites the patch and restarts the row, so the effect above
+    // disposes the previous `register()` handles and re-registers what is left.
+    // Calling `unregister` here would fight that ownership and leave a stale
+    // disposer in the effect's list.
+    async delete({ id, expectedRevision }) {
+      if (typeof expectedRevision !== 'string') throw profileError('PROFILE_CONFLICT', 'expectedRevision is required to delete a profile');
+      if (typeof id !== 'string' || !id.startsWith('profile-')) throw profileError('PROFILE_UNSUPPORTED', 'only custom profiles can be deleted; the bundled preset is declared by this package');
+      if (agentPresets.defaultId === id) throw profileError('PROFILE_IS_DEFAULT', `profile "${id}" is the default for new sessions; select another default before deleting it`);
+      const { editor, entry } = editorEntry();
+      let removed;
+      await editor.edit(entry, current => {
+        const profiles = { ...(current.profiles ?? {}) }, existing = profiles[id];
+        if (!existing) throw profileError('PROFILE_NOT_FOUND', `profile "${id}" does not exist`);
+        // Re-check under the write lock: another window may have pointed the
+        // new-session default at this id between the guard above and here.
+        if (agentPresets.defaultId === id) throw profileError('PROFILE_IS_DEFAULT', `profile "${id}" is the default for new sessions; select another default before deleting it`);
+        if (revisionForConfig(existing.config) !== expectedRevision) throw profileError('PROFILE_CONFLICT', `profile "${id}" changed since it was loaded`);
+        removed = { id, displayName: existing.displayName };
+        delete profiles[id];
+        return { ...current, profiles };
+      });
+      return removed;
+    },
     async setDefault({ profileId }) {
       if (profileId !== 'oh-my-dsh-slim' && !records()[profileId]) throw profileError('PROFILE_NOT_FOUND', `profile "${profileId}" does not exist`);
       await agentPresets.resolve(profileId);

@@ -510,6 +510,16 @@ console.log('\n[default action + initial selection]');
   check(card.canSetDefault({ kind: 'draft', isDefaultForNewSessions: false }) === false, 'new-profile draft → no action (nothing exists yet)');
   check(card.canSetDefault(undefined) === false, 'no profile → no action');
 
+  check(card.canDeleteProfile({ kind: 'custom', revision: 'r1' }) === true, 'persisted custom profile → delete action shown');
+  check(card.canDeleteProfile({ kind: 'custom', revision: '' }) === false, 'custom profile without a revision → no delete action');
+  check(card.canDeleteProfile({ kind: 'bundled' }) === false, 'bundled preset → no delete action (no record to remove)');
+  check(card.canDeleteProfile({ kind: 'draft' }) === false, 'new-profile draft → no delete action');
+  check(card.canDeleteProfile(undefined) === false, 'no profile → no delete action');
+  check(card.deleteErrorKey({ code: 'PROFILE_IS_DEFAULT' }) === 'is-default', 'default refusal maps to its own hint');
+  check(card.deleteErrorKey({ code: 'PROFILE_NOT_FOUND' }) === 'not-found', 'missing record maps to "already gone"');
+  check(card.deleteErrorKey({ code: 'PROFILE_CONFLICT' }) === 'conflict', 'stale revision maps to the conflict copy');
+  check(card.deleteErrorKey(new Error('boom')) === 'failed', 'unknown failure falls back to a generic message');
+
   const bundled = { id: 'oh-my-dsh-slim', kind: 'bundled' };
   const a = { id: 'profile-a', kind: 'custom', revision: 'r1' };
   const b = { id: 'profile-b', kind: 'custom', revision: 'r1' };
@@ -667,7 +677,7 @@ console.log('\n[rc.2 contract + baseline preservation]');
   const normalize = (text) => {
     let out = text;
     // New profile-selection/write helpers have no legacy counterpart.
-    for (const name of ['selectionInRoster', 'profileSaveMode', 'writeSettings']) {
+    for (const name of ['selectionInRoster', 'profileSaveMode', 'writeSettings', 'canDeleteProfile', 'deleteErrorKey']) {
       const block = extractHelper(out, name);
       if (block === undefined) continue;
       const before = out;
@@ -684,6 +694,9 @@ console.log('\n[rc.2 contract + baseline preservation]');
       if (current !== undefined && previous !== undefined) out = out.replace(current, previous);
     }
     return out
+      // 0.8.2 adds the profile-delete RPC to the adapter; the historical call
+      // shapes are unchanged.
+      .replaceAll("        delete: (payload) => call(PROFILE_RPC_METHODS.delete, payload),\n", '')
       .replaceAll('await scope.mutate(writeOps, snap.revision);', 'await scope.mutate(writeOps);')
       // 0.2 primitives renamed the icon exports; the card resolves them at runtime.
       .replaceAll('renderIcon(ui, ICON_WARNING, { size: 14 })', 'React.createElement(ui.IconWarningOutline16, { size: 14 })')

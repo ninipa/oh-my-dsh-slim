@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.1 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.2 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -71,7 +71,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.8.1
+oh-my-dsh-slim@0.8.2
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -81,7 +81,7 @@ oh-my-dsh-slim@0.8.1
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.1
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.2
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：
@@ -124,7 +124,9 @@ profile。**这不证明桌面 GUI 已自动渲染角色配置表单**；宿主�
 使用。因此恢复的是历史自定义卡片，通过 rc.2 的 configForms 与设置外壳的 `settings.section` 插槽接入
 （0.2 桌面就是用它渲染插件配置页），并保留原编辑助手与 revision 防冲突写入。卡片默认展开，
 模型下拉取自宿主自己的模型目录。`/omds` 命名配置采用本包专有配置行持久化及原生 registry 重建；隔离真实宿主
-已验证创建/保存、防冲突、既有上下文隔离、原生默认选择和重启恢复。浏览器渲染及在线模型/MCP 尚未
+已验证创建/保存、防冲突、既有上下文隔离、原生默认选择和重启恢复。卡片也支持删除配置：只有已持久化的
+自定义配置显示该按钮，删除前有独立确认弹窗；宿主端点会拒绝内置预设、外部原生 id、当前新会话默认
+以及过期的 revision。删除会从配置字典里移除记录，因此该预设也会从宿主 registry 中消失。浏览器渲染及在线模型/MCP 尚未
 针对本纠正版重新验收。默认会话预设通过宿主原生 Agent 预设设置选择。
 完整差异见 [兼容审计](./COMPATIBILITY-AUDIT.md)。
 
@@ -204,7 +206,7 @@ npm test
 传输层验收可单独运行 `test/web-host-smoke.cjs`：将 `DSH_HOST_ANCHOR` 设为已安装 DSH 的绝对 JS 入口，
 使用该宿主 Node 运行时；打包 Electron 需 `ELECTRON_RUN_AS_NODE=1` 和 `--expose-internals`。
 它组合真实 `dsh-web-app`，使用隔离 home/profile 与回环临时端口，不替换当前 GUI。
-已安装 rc.2 的 web smoke 五项哨兵全通过：鉴权与 Host/Origin 栅栏、五个 profile RPC 方法及冲突处理、
+已安装 rc.2 的 web smoke 五项哨兵全通过：鉴权与 Host/Origin 栅栏、六个 profile RPC 方法（含删除）及冲突处理、
 无效协议 envelope、完整重启后的持久化，以及路由卸载；两次启动均断言所有启用的宿主行处于 active 状态。
 测试使用实际发布包 patch；非客户端导出子入口避免重复客户端模块所有权。
 尚未验收浏览器视觉渲染、真实浏览器客户端执行或进行中的 HTTP 取消。

@@ -65,7 +65,7 @@ export function apply(ctx, config) {
   ctx.inject(['settings'], child => child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)));
   ctx.inject(['loader', 'connection', 'webServer', 'agentPresets', 'configEditor', 'settings'], async child => {
     const endpoints = makeProfileEndpoints({ agentPresets: child.agentPresets, getSettings: () => child.settings, getEditor: () => child.configEditor });
-    const methods = { 'profile-list': 'list', 'profile-create': 'create', 'profile-save': 'save', 'profile-set-default': 'setDefault', 'profile-migrate': 'migrate' };
+    const methods = { 'profile-list': 'list', 'profile-create': 'create', 'profile-save': 'save', 'profile-set-default': 'setDefault', 'profile-migrate': 'migrate', 'profile-delete': 'delete' };
     // Reuse the host RPC implementation, but explicitly own the route on the
     // child that injected webServer (not the connection provider's fiber).
     await registerProfileTransport(child, async (endpoint, payload, signal, peer) => {

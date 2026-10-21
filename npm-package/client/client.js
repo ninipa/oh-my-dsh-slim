@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
     // no build step or package metadata, so this is a literal; T0 and
     // client-card.test.mjs compare it with package.json so a release bump
     // cannot silently leave the header stale.
-    const VERSION = '0.8.1';
+    const VERSION = '0.8.2';
     const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
@@ -156,6 +156,7 @@ window.__ModuleLoader__.load({
       save: 'profile-save',
       setDefault: 'profile-set-default',
       migrate: 'profile-migrate',
+      delete: 'profile-delete',
     });
 
     const REQUIRED_PRIMITIVES = ['Button', 'Input', 'Modal', 'Toast'];
@@ -266,6 +267,15 @@ window.__ModuleLoader__.load({
       profileConflict: '配置已被其他窗口修改，请重新加载后再保存。',
       profileDefaultFailed: '新会话默认设置失败，请重试。',
       defaultSet: '已设为新会话默认',
+      deleteProfile: '删除',
+      deleteProfileTitle: '删除配置',
+      deleteProfileDescription: '删除后无法恢复。已经开始的会话继续运行；之后重新打开该配置下的会话时，会改用当前的新会话默认配置。',
+      deleteProfileConfirm: '确认删除',
+      deleteProfileDone: '已删除该配置',
+      deleteProfileFailed: '删除失败，请重试。',
+      deleteProfileNotFound: '该配置已不存在，可能已在其他窗口被删除。',
+      deleteProfileIsDefault: '这是当前新会话默认配置，请先把其他配置设为默认再删除。',
+      deleteProfileDirty: '该配置还有未保存的修改，删除会一并丢弃。',
     };
     const en = {
       desc: 'Expert-role subagent delegation preset and settings.',
@@ -347,6 +357,15 @@ window.__ModuleLoader__.load({
       profileConflict: 'This configuration changed in another window. Reload it before saving again.',
       profileDefaultFailed: 'Could not change the new-session default. Try again.',
       defaultSet: 'Default for new sessions set',
+      deleteProfile: 'Delete',
+      deleteProfileTitle: 'Delete configuration',
+      deleteProfileDescription: 'This cannot be undone. Sessions already running keep working; reopening a session created with this configuration falls back to the current new-session default.',
+      deleteProfileConfirm: 'Delete',
+      deleteProfileDone: 'Configuration deleted',
+      deleteProfileFailed: 'Could not delete the configuration. Try again.',
+      deleteProfileNotFound: 'That configuration no longer exists; another window may have deleted it.',
+      deleteProfileIsDefault: 'This is the new-session default. Set another configuration as the default first.',
+      deleteProfileDirty: 'This configuration has unsaved edits; deleting also discards them.',
     };
 
     // ------------------------------------------------------------- utilities
@@ -613,6 +632,20 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Whether a profile can be deleted. Only a PERSISTED custom profile
+     * qualifies: the bundled preset is declared by this package's patch row
+     * (there is no dict record to remove) and the in-place new-profile draft
+     * has not been stored yet. The revision is the fence the delete RPC
+     * requires, so a profile without one cannot be removed safely.
+     */
+    function canDeleteProfile(profile) {
+      return Boolean(profile)
+        && profile.kind === 'custom'
+        && typeof profile.revision === 'string'
+        && profile.revision !== '';
+    }
+
+    /**
      * Whether the "set as default for new sessions" action exists for a
      * profile: any non-default profile — bundled included, so the default can
      * always be switched back — but never the in-place new-profile draft.
@@ -745,6 +778,7 @@ window.__ModuleLoader__.load({
         save: (payload) => call(PROFILE_RPC_METHODS.save, payload),
         setDefault: (profileId) => call(PROFILE_RPC_METHODS.setDefault, { profileId }),
         migrate: (profileId) => call(PROFILE_RPC_METHODS.migrate, { profileId }),
+        delete: (payload) => call(PROFILE_RPC_METHODS.delete, payload),
       };
     }
 
@@ -753,6 +787,25 @@ window.__ModuleLoader__.load({
       const message = String(error?.message ?? '').toLowerCase();
       if (code.includes('conflict') || code === '409' || message.includes('conflict') || message.includes('already exists')) return 'conflict';
       return 'save';
+    }
+
+    /**
+     * Classify a profile-delete failure into the copy the dialog shows. The RPC
+     * returns distinct codes for each refusal; folding them into one generic
+     * "failed" would hide the only actionable one (IS_DEFAULT tells the user to
+     * pick another default first).
+     * @returns {'conflict'|'not-found'|'is-default'|'failed'}
+     */
+    function deleteErrorKey(error) {
+      const code = String(error?.code ?? error?.status ?? '').toUpperCase();
+      if (code === 'PROFILE_IS_DEFAULT') return 'is-default';
+      if (code === 'PROFILE_NOT_FOUND') return 'not-found';
+      if (code === 'PROFILE_CONFLICT') return 'conflict';
+      const message = String(error?.message ?? '').toLowerCase();
+      if (message.includes('conflict') || message.includes('changed since')) return 'conflict';
+      if (message.includes('does not exist')) return 'not-found';
+      if (message.includes('default for new sessions')) return 'is-default';
+      return 'failed';
     }
 
     /**
@@ -960,6 +1013,9 @@ window.__ModuleLoader__.load({
       const [expanded, setExpanded] = React.useState(() => Object.fromEntries(ROLE_IDS.map((id) => [id, false])));
       const [saving, setSaving] = React.useState(false);
       const [confirmReset, setConfirmReset] = React.useState(false);
+      // Delete confirmation: an independent modal because the removal is final
+      // and the profile name is the only proof of what is about to disappear.
+      const [deleteModal, setDeleteModal] = React.useState({ open: false, profileId: undefined, displayName: '', revision: undefined, error: undefined });
       const [toast, setToast] = React.useState(null);
       const [models, setModels] = React.useState({ status: 'loading', groups: [] });
       const loadModels = React.useCallback(() => {
@@ -1244,6 +1300,62 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const closeDeleteModal = () => setDeleteModal({ open: false, profileId: undefined, displayName: '', revision: undefined, error: undefined });
+      const openDeleteModal = (profile) => {
+        if (!profileAdapter) {
+          setProfileError(t('profileUnavailable'));
+          return;
+        }
+        if (!canDeleteProfile(profile)) return;
+        // The server enforces this too; failing here explains the rule before
+        // a round trip and keeps the user out of a dialog that cannot succeed.
+        if (profile.isDefaultForNewSessions === true) {
+          setProfileError(t('deleteProfileIsDefault'));
+          return;
+        }
+        setProfileError(undefined);
+        setDeleteModal({ open: true, profileId: profile.id, displayName: profile.displayName, revision: profile.revision, error: undefined });
+      };
+      const confirmDelete = async () => {
+        const target = deleteModal;
+        if (!profileAdapter || !target.profileId) return;
+        setSaving(true);
+        setProfileError(undefined);
+        try {
+          await profileAdapter.delete({ id: target.profileId, expectedRevision: target.revision });
+          closeDeleteModal();
+          // Deleted the profile being edited: point the card at the bundled
+          // preset immediately instead of rendering an id that is gone. The
+          // roster reload below keeps the dropdown in sync.
+          if (selectedId === target.profileId) {
+            setDraft(undefined);
+            setNewDraft(undefined);
+            setPendingSwitch(undefined);
+            setSelectedId(BUNDLED_PROFILE_ID);
+          }
+          setToast({ text: t('deleteProfileDone'), icon: renderIcon(ui, ICON_CHECK, { size: 14 }) });
+          await refreshRoster();
+        } catch (error) {
+          const key = deleteErrorKey(error);
+          if (key === 'not-found') {
+            // Another window already deleted it: the end state the user asked
+            // for holds, so close the dialog and resync instead of retrying.
+            closeDeleteModal();
+            setProfileError(t('deleteProfileNotFound'));
+            await refreshRoster();
+          } else {
+            setDeleteModal((previous) => ({
+              ...previous,
+              error: t(key === 'conflict'
+                ? 'profileConflict'
+                : key === 'is-default' ? 'deleteProfileIsDefault' : 'deleteProfileFailed'),
+            }));
+          }
+        } finally {
+          setSaving(false);
+        }
+      };
+
       // Rewrite one legacy profile directory into the dual-key persona form so
       // it mounts on DSH 0.1.5 (the host backs the file up first and is
       // idempotent, so a double click is harmless).
@@ -1424,6 +1536,14 @@ window.__ModuleLoader__.load({
               onClick: () => void makeDefault(selectedProfile.id),
             }, t('setNewSessionDefault'))
             : null,
+          // Deleting is final, so the action only exists for a persisted custom
+          // profile and always confirms in its own dialog.
+          canDeleteProfile(selectedProfile)
+            ? React.createElement(ui.Button, {
+              variant: 'outline', size: 'sm', disabled: saving || !writable,
+              onClick: () => openDeleteModal(selectedProfile),
+            }, t('deleteProfile'))
+            : null,
         ),
         React.createElement('span', { style: { fontSize: 11, color: color.tertiary, lineHeight: '16px' } }, t('selectionHint')),
         selectedProfile?.needsMigration === true
@@ -1508,6 +1628,28 @@ window.__ModuleLoader__.load({
         ),
       }, null) : null;
 
+      const deleteModalNode = deleteModal.open ? React.createElement(ui.Modal, {
+        open: true,
+        onClose: closeDeleteModal,
+        closeLabel: t('cancel'),
+        title: t('deleteProfileTitle'),
+        description: t('deleteProfileDescription'),
+        footer: React.createElement(React.Fragment, null,
+          React.createElement(ui.Button, { variant: 'outline', size: 'sm', disabled: saving, onClick: closeDeleteModal }, t('cancel')),
+          React.createElement(ui.Button, { variant: 'primary', size: 'sm', disabled: saving, onClick: () => void confirmDelete() }, t('deleteProfileConfirm')),
+        ),
+      },
+        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+          React.createElement('span', { style: { fontSize: 13, fontWeight: 600, color: color.text, lineHeight: '18px' } }, deleteModal.displayName),
+          selectedId === deleteModal.profileId && dirty
+            ? React.createElement('span', { style: { fontSize: 12, color: color.warn, lineHeight: '16px' } }, t('deleteProfileDirty'))
+            : null,
+          deleteModal.error
+            ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', lineHeight: '16px' } }, deleteModal.error)
+            : null,
+        ),
+      ) : null;
+
       // Collapsed cards render only the header row; every editable surface
       // (profile strip, roles, actions, hints, toast mount point) lives
       // behind cardOpen.
@@ -1531,7 +1673,7 @@ window.__ModuleLoader__.load({
           background: 'var(--dsw-alias-bg-layer-3)',
           display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden',
         },
-      }, headerButton, body, nameModalNode, guardModalNode);
+      }, headerButton, body, nameModalNode, guardModalNode, deleteModalNode);
     }
 
     // ----------------------------------------------------------------- apply
@@ -1586,6 +1728,8 @@ window.__ModuleLoader__.load({
     exports.unwrapProfileRpc = unwrapProfileRpc;
     exports.ProfileSelect = ProfileSelect;
     exports.canSetDefault = canSetDefault;
+    exports.canDeleteProfile = canDeleteProfile;
+    exports.deleteErrorKey = deleteErrorKey;
     exports.resolveInitialSelection = resolveInitialSelection;
     exports.selectionInRoster = selectionInRoster;
     exports.profileSaveMode = profileSaveMode;

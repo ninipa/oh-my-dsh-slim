@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.1 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.2 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -94,7 +94,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.1
+oh-my-dsh-slim@0.8.2
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -104,7 +104,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.1
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.2
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules
@@ -159,6 +159,10 @@ expanded, and its model dropdowns come from the host's own model catalog.
 The `/omds` named-profile workflow is implemented with persisted records in an owned configuration
 row and native registry registration. Isolated installed-host tests cover create/save, revision
 conflicts, existing-context isolation, native default selection, and persistence after reboot.
+The card also deletes a configuration: only a persisted custom profile offers the action, the
+removal is confirmed in its own dialog, and the host endpoint refuses the bundled preset, a
+foreign native id, the current new-session default, and a stale revision. Deleting removes the
+record from the profile patch, so the preset disappears from the host's registry as well.
 Browser rendering and live provider/MCP acceptance have not been revalidated for this correction.
 Select the default session preset in the native Agent Presets settings. See the
 [compatibility audit](./COMPATIBILITY-AUDIT.md).
@@ -254,8 +258,9 @@ absolute installed DSH JS entry, using that host's Node runtime (packaged Electr
 `ELECTRON_RUN_AS_NODE=1` and `--expose-internals`). It mounts the real `dsh-web-app` bundle with
 an isolated home/profile and a loopback ephemeral port; it does not replace the running GUI.
 The installed rc.2 web smoke passed all five sentinels: authentication and Host/Origin fencing,
-all five profile RPC methods and conflict handling, invalid wire envelopes, persistence across
-full restart, and route disposal. Both boots assert every enabled host row is active.
+all six profile RPC methods (delete included) and conflict handling, invalid wire envelopes,
+persistence across full restart, and route disposal. Both boots assert every enabled host row is
+active.
 It uses the actual published patch; exported non-client subpaths prevent duplicate client-module
 ownership. Visual browser rendering, actual browser client execution and in-flight cancellation
 are not acceptance-tested.

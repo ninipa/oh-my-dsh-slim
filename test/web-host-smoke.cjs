@@ -170,6 +170,26 @@ async function rpc(method, payload = {}) {
     const migrated = await rpc('profile-migrate', { profileId: first.id }); assert.equal(migrated.ok, true); assert.equal(migrated.value.changed, false);
     const afterSave = await rpc('profile-list'); assert.equal(afterSave.value.defaultProfileId, first.id); assert.equal(afterSave.value.profiles.find(p => p.id === first.id).config.roles.oracle.model, 'http-saved');
     console.log('WEB_PROFILE_HTTP_ROUTES_PASS');
+    // Deleting removes a record from the profile dict, so the registry row
+    // restarts and the preset must vanish from the HOST's own registry too —
+    // asserting the /omds roster alone would not prove the unregister happened.
+    const pending = await rpc('profile-create', { displayName: 'HTTP Named B', config: {} }); assert.equal(pending.ok, true);
+    const second = pending.value;
+    const presets = ctx.get('agentPresets');
+    assert.equal((await presets.resolve(second.id)).id, second.id);
+    const refusedDefault = await rpc('profile-delete', { id: first.id, expectedRevision: saved.value.revision });
+    assert.equal(refusedDefault.ok, false); assert.equal(refusedDefault.error.code, 'PROFILE_IS_DEFAULT');
+    const refusedBundled = await rpc('profile-delete', { id: 'oh-my-dsh-slim', expectedRevision: 'x' });
+    assert.equal(refusedBundled.ok, false); assert.equal(refusedBundled.error.code, 'PROFILE_UNSUPPORTED');
+    const deleted = await rpc('profile-delete', { id: second.id, expectedRevision: second.revision });
+    assert.equal(deleted.ok, true, JSON.stringify(deleted)); assert.equal(deleted.value.id, second.id);
+    await assert.rejects(presets.resolve(second.id), error => /Unknown agent preset/.test(error.message));
+    const afterDelete = await rpc('profile-list');
+    assert.equal(afterDelete.value.profiles.some(profile => profile.id === second.id), false);
+    assert.equal(afterDelete.value.profiles.find(p => p.id === first.id).revision, saved.value.revision);
+    const twice = await rpc('profile-delete', { id: second.id, expectedRevision: second.revision });
+    assert.equal(twice.ok, false); assert.equal(twice.error.code, 'PROFILE_NOT_FOUND');
+    console.log('WEB_PROFILE_DELETE_PASS');
     assert.equal((await request('/omds/profile-list', { body: '{bad' })).status, 400);
     assert.equal((await request('/omds/profile-list', { body: '{}', headers: { 'content-type': 'text/plain' } })).status, 415);
     const invalid = await request('/omds/profile-list', { body: { rpcId: 'invalid' } }); assert.equal(JSON.parse(invalid.text).result.error.code, 'gateway/bad-request');

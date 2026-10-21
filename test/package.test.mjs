@@ -329,3 +329,21 @@ test('the client bundle keeps the backend role roster in sync', async () => {
   assert.match(source, /const ROLE_IDS = \[\.\.\.UPSTREAM_ROLE_IDS, \.\.\.COUNCILLOR_ROLE_IDS, COUNCIL_ROLE_ID\];/,
     'ROLE_IDS must be composed, not duplicated as a literal');
 });
+
+test('the client profile RPC map mirrors the host endpoint table', () => {
+  // Two hand-written literals: the host's `/omds` method table and the card's
+  // client map. A one-sided addition fails at runtime only (the card calls an
+  // endpoint the host rejects), so pin the exact correspondence here.
+  const client = readFileSync(join(root, 'npm-package', 'client', 'client.js'), 'utf8');
+  const host = readFileSync(join(root, 'npm-package', 'lib', 'index.js'), 'utf8');
+  const clientBlock = /const PROFILE_RPC_METHODS = Object\.freeze\(\{([\s\S]*?)\}\);/.exec(client)?.[1] ?? '';
+  const hostBlock = /const methods = \{([^}]*)\};/.exec(host)?.[1] ?? '';
+  const clientPairs = [...clientBlock.matchAll(/(\w+): '(profile-[a-z-]+)'/g)]
+    .map(([, method, endpoint]) => `${endpoint}:${method}`).sort();
+  const hostPairs = [...hostBlock.matchAll(/'(profile-[a-z-]+)': '(\w+)'/g)]
+    .map(([, endpoint, method]) => `${endpoint}:${method}`).sort();
+  assert.ok(clientPairs.length > 0 && hostPairs.length > 0, 'both tables were parsed');
+  assert.deepEqual(clientPairs, hostPairs, 'client PROFILE_RPC_METHODS and host methods agree');
+  assert.match(client, /delete: \(payload\) => call\(PROFILE_RPC_METHODS\.delete, payload\)/,
+    'the card exposes the delete endpoint');
+});

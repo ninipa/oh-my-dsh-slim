@@ -4,6 +4,42 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.2] — Delete a delegation configuration
+
+Patch release adding the missing removal path for the custom configurations the
+settings card creates (`/omds` profiles). Requested in
+[ninipa/oh-my-dsh-slim#7](https://github.com/ninipa/oh-my-dsh-slim/issues/7).
+
+- **`profile-delete` endpoint.** Only a record in this package's own profile dict
+  can be removed. Every other case is an explicit refusal, never a silent
+  no-op: the bundled `oh-my-dsh-slim` preset and any id outside the `profile-`
+  namespace (the host's native `standard` included) answer `PROFILE_UNSUPPORTED`,
+  the current new-session default answers `PROFILE_IS_DEFAULT` so no session can
+  point at an identity that no longer exists, a missing record answers
+  `PROFILE_NOT_FOUND`, and `expectedRevision` is required and compared exactly
+  like `save`'s concurrency fence.
+- **No manual unregister.** Deleting drops the dict entry only:
+  `configEditor.edit` rewrites the profile patch and restarts the registry row,
+  whose own effect disposes the previous `register()` handles and re-registers
+  what is left. The preset therefore leaves the host registry too; the web smoke
+  asserts `agentPresets.resolve()` rejects after the delete rather than trusting
+  the `/omds` roster alone.
+- **Card UI.** The action is offered only for a persisted custom profile, and it
+  confirms in its own dialog because the removal is final. Deleting the profile
+  being edited falls back to the bundled preset; unsaved edits of that profile
+  are called out in the dialog; the three refusal codes map to distinct copy
+  instead of one generic failure, and the current default is refused before the
+  round trip with the "set another configuration as the default first" hint.
+- **Contract test.** `test/package.test.mjs` cross-checks the card's
+  `PROFILE_RPC_METHODS` literal against the host's `/omds` method table, so an
+  endpoint added on one side alone fails without a running host.
+- **Verification.** 146 unit/integration tests, 0 failures; `T0` and the host-row
+  audit pass; the web-host smoke adds the delete path (refusals, unregistration
+  in the host registry, roster reload, restart persistence) and passes on both
+  admitted host lines (0.2.0-rc.2, 0.2.1-rc.2) in the normal and npm-global
+  symlink anchor modes. The role-composition, council, cold-resume and
+  real-role-row smokes pass on 0.2.1.
+
 ## [0.8.1] — CLI settings visibility and default-profile saves
 
 Patch release for the two regressions reported against 0.8.0 on DSH

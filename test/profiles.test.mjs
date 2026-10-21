@@ -81,3 +81,54 @@ test('named composition identity reaches all config consumers only', () => {
   assert.ok(composition, 'role-composition row is part of the preset');
   assert.equal(composition.config.profileId, 'profile-test');
 });
+
+test('delete removes one custom profile and leaves its neighbours untouched', async () => {
+  const { entry, endpoints } = fixture();
+  const keep = await endpoints.create({ displayName: 'Keep', config: { roles: { oracle: { model: 'keep' } } } });
+  const drop = await endpoints.create({ displayName: 'Drop', config: { roles: { oracle: { model: 'drop' } } } });
+  const removed = await endpoints.delete({ id: drop.id, expectedRevision: drop.revision });
+  assert.deepEqual(removed, { id: drop.id, displayName: 'Drop' });
+  const list = await endpoints.list();
+  assert.equal(list.profiles.some(profile => profile.id === drop.id), false);
+  assert.equal(list.profiles.find(profile => profile.id === keep.id).config.roles.oracle.model, 'keep');
+  // A row-level field this package does not own must survive the whole-document write.
+  assert.deepEqual(entry.options.config.unrelated, { preserve: true });
+});
+
+test('delete refuses the bundled preset and foreign native ids', async () => {
+  const { endpoints } = fixture();
+  await assert.rejects(endpoints.delete({ id: 'oh-my-dsh-slim', expectedRevision: 'r' }), error => error.code === 'PROFILE_UNSUPPORTED');
+  // 0.2.x hosts ship "standard" as their native default; it has no record here.
+  await assert.rejects(endpoints.delete({ id: 'standard', expectedRevision: 'r' }), error => error.code === 'PROFILE_UNSUPPORTED');
+});
+
+test('delete refuses the new-session default until another profile takes over', async () => {
+  const { endpoints } = fixture();
+  const a = await endpoints.create({ displayName: 'Default', config: {} });
+  await endpoints.setDefault({ profileId: a.id });
+  await assert.rejects(endpoints.delete({ id: a.id, expectedRevision: a.revision }), error => error.code === 'PROFILE_IS_DEFAULT');
+  assert.ok((await endpoints.list()).profiles.some(profile => profile.id === a.id));
+  // Switching the default back makes the same deletion succeed — both sides of
+  // the guard, not just the refusal.
+  await endpoints.setDefault({ profileId: 'oh-my-dsh-slim' });
+  assert.deepEqual(await endpoints.delete({ id: a.id, expectedRevision: a.revision }), { id: a.id, displayName: 'Default' });
+});
+
+test('delete requires expectedRevision and rejects a stale one', async () => {
+  const { endpoints } = fixture();
+  const a = await endpoints.create({ displayName: 'Fenced', config: { roles: { oracle: { model: 'one' } } } });
+  await assert.rejects(endpoints.delete({ id: a.id }), error => error.code === 'PROFILE_CONFLICT');
+  const saved = await endpoints.save({ id: a.id, expectedRevision: a.revision, config: { roles: { oracle: { model: 'two' } } } });
+  await assert.rejects(endpoints.delete({ id: a.id, expectedRevision: a.revision }), error => error.code === 'PROFILE_CONFLICT');
+  // A refused delete must not have removed the record on its way out.
+  assert.equal((await endpoints.list()).profiles.find(profile => profile.id === a.id).revision, saved.revision);
+  await endpoints.delete({ id: a.id, expectedRevision: saved.revision });
+});
+
+test('delete reports a missing profile instead of succeeding silently', async () => {
+  const { endpoints } = fixture();
+  await assert.rejects(
+    endpoints.delete({ id: 'profile-missing-000000000000', expectedRevision: 'r' }),
+    error => error.code === 'PROFILE_NOT_FOUND' && /does not exist/.test(error.message),
+  );
+});
