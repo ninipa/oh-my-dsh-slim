@@ -4,6 +4,36 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.3] — Live role model changes
+
+Patch release making a saved role model take effect on the current conversation,
+not only on sessions created afterwards. Requested in
+[ninipa/oh-my-dsh-slim#8](https://github.com/ninipa/oh-my-dsh-slim/issues/8),
+where a pinned subagent model became unusable mid-conversation and the card
+could not rescue the running session.
+
+- **Route resolved per request.** `subagent-roles` compares the configured
+  `provider`/`model` with the route the child inherited at mount on every
+  `agent/request`; a saved change reroutes the child's next request. No new
+  endpoint, config field, command, or session state.
+- **Effort compatibility.** When the model changes, the role effort is checked
+  against the new model's declared efforts; an unsupported level falls back to
+  the model default with one warning instead of failing the request. An
+  unchanged route keeps the existing strict validation.
+- **Output cap.** `maxTokens` is clamped to the new model's declared
+  `defaultMaxTokens` when that is smaller.
+- **Fail-open metadata.** A route whose metadata cannot be resolved keeps the
+  current route and warns once: metadata lookup is advisory, as upstream, and
+  must not break a request that still has a working route.
+- **Copy.** The settings card now says model, effort and temperature apply to
+  the current session immediately after saving; token budget and role toggles
+  still apply to new sessions.
+- **Verification.** 157 unit/integration tests (151 pass, 6 skipped, 0 fail);
+  `T0`; a new no-model host smoke on both 0.2.0 and 0.2.1 that edits the role
+  configuration between two delegations and asserts the second child's route,
+  effort fallback and token clamp; the role-composition, council, cold-resume
+  and real-role-row smokes on 0.2.1.
+
 ## [0.8.2] — Delete a delegation configuration
 
 Patch release adding the missing removal path for the custom configurations the

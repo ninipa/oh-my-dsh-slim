@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
     // no build step or package metadata, so this is a literal; T0 and
     // client-card.test.mjs compare it with package.json so a release bump
     // cannot silently leave the header stale.
-    const VERSION = '0.8.2';
+    const VERSION = '0.8.3';
     const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
@@ -206,7 +206,7 @@ window.__ModuleLoader__.load({
       reset: '恢复默认',
       resetConfirm: '确认恢复默认？',
       resetDone: '已恢复默认',
-      effectiveHint: '思考强度与温度对当前会话立即生效；模型、token 上限与角色启停从新会话开始生效。',
+      effectiveHint: '模型、思考强度与温度保存后对当前会话立即生效；token 上限与角色启停从新会话开始生效。',
       readOnly: '当前连接只读，无法在此修改配置。',
       modelsLoading: '模型目录加载中…',
       modelsEmpty: '未发现可用模型：请先在 设置-模型 导入 provider。',
@@ -296,7 +296,7 @@ window.__ModuleLoader__.load({
       reset: 'Reset to defaults',
       resetConfirm: 'Reset to defaults?',
       resetDone: 'Reset to defaults',
-      effectiveHint: 'Effort and temperature apply to the current session immediately; model, token budget and role toggles apply to new sessions.',
+      effectiveHint: 'Model, effort and temperature apply to the current session immediately after saving; token budget and role toggles apply to new sessions.',
       readOnly: 'This connection is read-only; configuration cannot be edited here.',
       modelsLoading: 'Loading model catalog\u2026',
       modelsEmpty: 'No models found: import a provider under Settings \u2192 Models first.',

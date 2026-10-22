@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.2 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.3 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -94,7 +94,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.2
+oh-my-dsh-slim@0.8.3
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -104,7 +104,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.2
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.3
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules
@@ -214,8 +214,9 @@ Both named legacy configurations and compact role overrides remain accepted:
 - Effort tokens are shape-checked, not limited to the shipped `off`/`low`/`high`/`max` vocabulary.
   Delegation checks model metadata when changing effort and reports mismatches; metadata lookup
   failure retains the upstream fail-open behavior. `none` preserves the host-resolved effort.
-- Model, token and tool composition changes should be used in a new session. Effort and
-  temperature are re-read on delegated requests; this does not make plugin installation live.
+- Model, effort and temperature are re-read on delegated requests: saving the card reroutes the
+  next child request, so a model change applies to the current conversation. Token budget and role
+  toggles still apply to new sessions. This does not make plugin installation live.
 
 ## Official, role-scoped MCP restored
 
@@ -257,7 +258,7 @@ For opt-in transport acceptance, run `test/web-host-smoke.cjs` with `DSH_HOST_AN
 absolute installed DSH JS entry, using that host's Node runtime (packaged Electron needs
 `ELECTRON_RUN_AS_NODE=1` and `--expose-internals`). It mounts the real `dsh-web-app` bundle with
 an isolated home/profile and a loopback ephemeral port; it does not replace the running GUI.
-The installed rc.2 web smoke passed all five sentinels: authentication and Host/Origin fencing,
+The installed rc.2 web smoke passed all six sentinels: authentication and Host/Origin fencing,
 all six profile RPC methods (delete included) and conflict handling, invalid wire envelopes,
 persistence across full restart, and route disposal. Both boots assert every enabled host row is
 active.

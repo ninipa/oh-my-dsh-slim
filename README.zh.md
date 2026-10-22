@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.2 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.3 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -71,7 +71,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.8.2
+oh-my-dsh-slim@0.8.3
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -81,7 +81,7 @@ oh-my-dsh-slim@0.8.2
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.2
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.3
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：
@@ -170,8 +170,8 @@ profile。**这不证明桌面 GUI 已自动渲染角色配置表单**；宿主�
   `deny`、`mcps`、`personaAppend`。非空 `tools` 为穷举白名单；空数组表示未配置，不是禁止全部工具。
 - effort 只校验 token 形状，不限于随包 `off`/`low`/`high`/`max`。委派时检查模型元数据并报告不匹配。
   修改 effort 时校验；模型元信息查询失败保留原版 fail-open 行为。`none` 保留宿主已解析的 effort。
-- 模型、token 与工具组合修改应使用新会话。effort 与 temperature 每次委派请求重读；
-  这不意味着插件安装可以实时生效。
+- 模型、effort 与 temperature 在每次委派请求时重读：保存卡片后，当前会话的下一次子代理请求
+  即使用新模型。token 上限与角色启停仍需新会话。这不意味着插件安装可以实时生效。
 
 ## 官方角色作用域 MCP 已恢复
 
@@ -206,7 +206,7 @@ npm test
 传输层验收可单独运行 `test/web-host-smoke.cjs`：将 `DSH_HOST_ANCHOR` 设为已安装 DSH 的绝对 JS 入口，
 使用该宿主 Node 运行时；打包 Electron 需 `ELECTRON_RUN_AS_NODE=1` 和 `--expose-internals`。
 它组合真实 `dsh-web-app`，使用隔离 home/profile 与回环临时端口，不替换当前 GUI。
-已安装 rc.2 的 web smoke 五项哨兵全通过：鉴权与 Host/Origin 栅栏、六个 profile RPC 方法（含删除）及冲突处理、
+已安装 rc.2 的 web smoke 六项哨兵全通过：鉴权与 Host/Origin 栅栏、六个 profile RPC 方法（含删除）及冲突处理、
 无效协议 envelope、完整重启后的持久化，以及路由卸载；两次启动均断言所有启用的宿主行处于 active 状态。
 测试使用实际发布包 patch；非客户端导出子入口避免重复客户端模块所有权。
 尚未验收浏览器视觉渲染、真实浏览器客户端执行或进行中的 HTTP 取消。
