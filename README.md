@@ -24,6 +24,12 @@ directory to copy.
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
 
+> **0.8.3 (2026-10-22): live role model changes.** Saving a role's model in the settings card
+> now applies to the next delegation in the current conversation, without starting a new session.
+> Effort is re-validated against the new model (an unsupported level falls back to the model
+> default) and the output cap is clamped to the new model's limit. See
+> [CHANGELOG.md](./CHANGELOG.md) for the full release notes.
+
 ## Roles and delegation
 
 | Role | Tool | Default model | Effort | Permissions |

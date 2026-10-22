@@ -19,6 +19,10 @@
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
 
+> **0.8.3（2026-10-22）：角色模型热生效。** 在设置卡片里改角色模型并保存后，当前会话的
+> 下一次委派即使用新模型，无需新开会话。effort 会按新模型重新校验（不支持的强度降级为
+> 模型默认值），输出上限按新模型收敛。完整说明见 [CHANGELOG.md](./CHANGELOG.md)。
+
 ## 角色与委派
 
 | 角色 | 工具 | 默认模型 | effort | 权限 |
