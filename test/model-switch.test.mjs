@@ -163,3 +163,118 @@ test('a saved temperature change still applies while the route changes', async (
   assert.equal(result.provider, 'openrouter');
   assert.equal(result.temperature, 0.7);
 });
+
+// Issue #9, second half: the card gates new saves, but configuration written
+// outside it (an old profile, a hand-edited document, a model whose declaration
+// changed) reaches the first dispatch unchanged. A stored level the mounted
+// model does not offer must degrade to the model default there as well, instead
+// of failing at dispatch with `does not support reasoning effort`.
+test('an unchanged route whose model does not offer the saved effort degrades instead of failing', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 128000 };
+  const { result, warnings } = await run({
+    profiles: profile({ provider: BASE, model: PRO, effort: 'max', temperature: 0.1 }),
+    info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'off' }, { id: 'low' }, { id: 'high' }] } } },
+    resolved,
+  });
+  assert.equal('reasoningEffort' in result, false);
+  assert.equal(result.maxTokens, 128000);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /effort "max" is not offered by "deepseek-official\/deepseek-v4-pro"; using the model default/);
+});
+
+test('a model with no effort control drops a saved level on an unchanged route', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1 };
+  const { result, warnings } = await run({
+    profiles: profile({ provider: BASE, model: PRO, effort: 'high', temperature: 0.1 }),
+    info: { [BASE + '/' + PRO]: { provider: BASE, id: PRO, name: 'pro' } },
+    resolved,
+  });
+  assert.equal('reasoningEffort' in result, false);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /The model declares no reasoning efforts/);
+});
+
+test('a supported level is kept on an unchanged route', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1 };
+  const { result, warnings } = await run({
+    profiles: profile({ provider: BASE, model: PRO, effort: 'max', temperature: 0.1 }),
+    info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'max' }, { id: 'high' }] } } },
+    resolved,
+  });
+  assert.deepEqual(result, resolved);
+  assert.equal(warnings.length, 0);
+});
+
+test('an unchanged route with unavailable metadata keeps the saved effort', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1 };
+  const { result, warnings } = await run({
+    profiles: profile({ provider: BASE, model: PRO, effort: 'max', temperature: 0.1 }),
+    info: {},
+    resolved,
+  });
+  assert.deepEqual(result, resolved);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /metadata is unavailable; keeping the current route/);
+});
+
+// The saved route's metadata can be unavailable while the request still runs on
+// the route the host resolved. The effort must then be judged against that
+// route, because that is where it will actually be sent.
+const profileFor = (roleId, config) => ({ p: { roles: { [roleId]: config } } });
+
+test('a failed target lookup validates the effort against the route that will run', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1 };
+  const { result, warnings } = await run({
+    profiles: profileFor('fixer', { provider: 'openrouter', model: 'qwen3-coder', effort: 'high', temperature: 0.1 }),
+    info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'low' }] } } },
+    resolved,
+    roleId: 'fixer',
+  });
+  assert.equal(result.provider, BASE, 'without target metadata the request is not rerouted');
+  assert.equal('reasoningEffort' in result, false, 'the saved level is checked against the resolved route');
+  assert.match(warnings.join('\n'), /effort "high" is not offered by "deepseek-official\/deepseek-v4-pro"/,
+    'the warning names the route the request actually runs on');
+  assert.equal(warnings.filter((entry) => /metadata is unavailable/.test(entry)).length, 1,
+    'the silent re-check does not repeat the metadata warning');
+});
+
+test('a failed target lookup keeps a level the resolved route offers', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1 };
+  const { result } = await run({
+    profiles: profileFor('fixer', { provider: 'openrouter', model: 'qwen3-coder', effort: 'high', temperature: 0.1 }),
+    info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'high' }] } } },
+    resolved,
+    roleId: 'fixer',
+  });
+  assert.deepEqual(result, resolved);
+});
+
+test('a saved effort change applies on an unchanged route', async () => {
+  const { result } = await run({
+    profiles: profileFor('designer', { provider: BASE, model: PRO, effort: 'low', temperature: 0.1 }),
+    info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } } },
+    resolved: { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1 },
+    roleId: 'designer',
+  });
+  assert.equal(result.reasoningEffort, 'low');
+});
+
+test('an unsupported saved effort drops the inherited level instead of keeping it', async () => {
+  const { result } = await run({
+    profiles: profileFor('designer', { provider: BASE, model: PRO, effort: 'max', temperature: 0.1 }),
+    info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } } },
+    resolved: { provider: BASE, model: PRO, reasoningEffort: 'low', temperature: 0.1 },
+    roleId: 'designer',
+  });
+  assert.equal('reasoningEffort' in result, false, 'the model default is used, not the stale level');
+});
+
+test('an unsupported effort warns once per role, route and level', async () => {
+  const profiles = profileFor('librarian', { provider: BASE, model: PRO, effort: 'max', temperature: 0.1 });
+  const info = { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'low' }] } } };
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1 };
+  const first = await run({ profiles, info, resolved, roleId: 'librarian' });
+  assert.equal(first.warnings.length, 1);
+  const second = await run({ profiles, info, resolved, roleId: 'librarian' });
+  assert.equal(second.warnings.length, 0, 'the same fallback is not reported twice');
+});

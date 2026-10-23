@@ -54,7 +54,7 @@ const log = (...args) => console.log('[model-switch-smoke]', ...args);
     const writeRoles = (model, effort, maxTokens) => fs.writeFileSync(roleConfigPath, JSON.stringify({
       roles: { oracle: { provider: 'fake', model, effort, temperature: 0.1, maxTokens } },
     }));
-    writeRoles('route-a', 'none', 128000);
+    writeRoles('route-a', 'max', 128000);
     process.env.OH_MY_DSH_SLIM_CONFIG = roleConfigPath;
 
     class FakeAdapter extends LlmAdapter {
@@ -95,7 +95,7 @@ const log = (...args) => console.log('[model-switch-smoke]', ...args);
         try {
           c.llm.registerAdapter(['fake'], new FakeAdapter());
           const parent = (await c.agents.create({ sessionId: 'model-switch-root-' + randomUUID(), meta: { cwd: process.cwd() } })).agent;
-          parent.options = { ...parent.options, provider: 'fake', model: 'route-a', reasoningEffort: 'high', maxTokens: 128000 };
+          parent.options = { ...parent.options, provider: 'fake', model: 'route-a', reasoningEffort: 'max', maxTokens: 128000 };
 
           const request = async () => {
             const wait = new Promise((done, fail) => {
@@ -115,16 +115,27 @@ const log = (...args) => console.log('[model-switch-smoke]', ...args);
           const first = await request();
           assert.equal(first.provider, 'fake', 'first child keeps the mounted route provider');
           assert.equal(first.model, 'route-a', 'first child keeps the mounted route model');
+          // The mounted route (resolved by the host before this request) carries
+          // effort "max", which the fake model does not offer: the first child
+          // must run on the model default instead of failing at dispatch.
+          assert.equal(first.effort, undefined, 'an incompatible level is dropped on the first request');
+          assert.equal(first.maxTokens, 128000, 'the first request keeps the configured cap');
 
-          writeRoles('route-b', 'max', 999999);
+          writeRoles('route-b', 'high', 999999);
           const second = await request();
-          log('observed', JSON.stringify(observed));
           assert.equal(second.provider, 'fake', 'second child keeps the configured provider');
           assert.equal(second.model, 'route-b', 'a saved route change applies to the next child request');
-          assert.equal(second.effort, undefined, 'an unsupported effort falls back to the model default');
+          assert.equal(second.effort, 'high', 'a level the new model offers is carried over');
           assert.equal(second.maxTokens, 4096, 'the output cap is clamped to the new model');
 
-          log('MODEL_SWITCH_SMOKE_PASS', JSON.stringify({ first, second }));
+          writeRoles('route-b', 'max', 999999);
+          const third = await request();
+          log('observed', JSON.stringify(observed));
+          assert.equal(third.model, 'route-b', 'the rerouted model is kept');
+          assert.equal(third.effort, undefined, 'an unsupported effort falls back to the model default');
+          assert.equal(third.maxTokens, 4096, 'the clamped cap survives a further edit');
+
+          log('MODEL_SWITCH_SMOKE_PASS', JSON.stringify({ first, second, third }));
           resolve();
         } catch (error) {
           reject(error);

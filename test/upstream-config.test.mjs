@@ -99,10 +99,14 @@ test('role temperature overrides inherited temperature; none preserves effort', 
   assert.deepEqual(await requestHarness()(undefined, {}), { reasoningEffort: 'high', temperature: 0.1 });
 });
 
-test('effort metadata validation uses rc.2 route and fails open on lookup failure', async t => {
+test('an unsupported effort on the mounted route is dropped; a failed lookup fails open', async t => {
   const f = fixture(t); f.save({ roles: { fixer: { effort: 'xhigh' } } });
   const run = requestHarness({ resolveModelInfo: async (provider, model) => { assert.equal(provider, 'actual'); assert.equal(model, 'actual-model'); return { reasoning: { efforts: [{ id: 'low' }] } }; } });
-  await assert.rejects(run('fixer', { provider: 'actual', model: 'actual-model' }), /not offered/);
+  // 0.8.4: a level the mounted model does not offer is dropped (the model
+  // default runs) instead of rejecting the child's first request — the card
+  // gates new saves, this path serves configuration written outside it.
+  const dropped = await run('fixer', { provider: 'actual', model: 'actual-model', reasoningEffort: 'xhigh' });
+  assert.equal('reasoningEffort' in dropped, false, 'the undeclared level is dropped instead of failing dispatch');
   assert.equal((await requestHarness({ resolveModelInfo: async () => { throw new Error('unknown'); } })('fixer', {})).reasoningEffort, 'xhigh');
   assert.equal((await requestHarness({ resolveModelInfo: () => { throw new Error('must not query unchanged effort'); } })('fixer', { reasoningEffort: 'xhigh' })).reasoningEffort, 'xhigh');
 });

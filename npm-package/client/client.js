@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
     // no build step or package metadata, so this is a literal; T0 and
     // client-card.test.mjs compare it with package.json so a release bump
     // cannot silently leave the header stale.
-    const VERSION = '0.8.3';
+    const VERSION = '0.8.4';
     const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
@@ -104,6 +104,19 @@ window.__ModuleLoader__.load({
       if (effort === undefined || effort === null || effort === '' || effort === 'none') return false;
       if (findModelEntry(groups, provider, model) === undefined) return false;
       return !effortOptionsFor(groups, provider, model).some((option) => option.value === effort);
+    }
+
+    /**
+     * Whether a role's stored effort must block saving and render the error.
+     *
+     * A switched-off role is never dispatched, so its effort cannot fail at
+     * dispatch and must not gate the card: observer ships disabled with
+     * effort "high", and a model without that level would otherwise lock every
+     * save — including the roles the user is actually editing.
+     */
+    function effortGatesSave(role, groups) {
+      return role?.enabled !== false
+        && effortMismatch(role?.effort, groups, role?.provider, role?.model);
     }
 
     // Fields the card manages on the preset layer (inherit-or-override vs the
@@ -194,6 +207,7 @@ window.__ModuleLoader__.load({
       model: '模型',
       effort: '思考强度',
       effortNoneHint: '不向模型传递 reasoningEffort 参数，适用于不支持思考强度的模型。',
+      effortPlaceholder: '请选择',
       advanced: '高级',
       advancedWarn: '非必要不要修改默认值，可能改变插件行为。',
       maxTokens: 'token 上限',
@@ -214,7 +228,7 @@ window.__ModuleLoader__.load({
       currentValueTag: '当前值',
       invalidMaxTokens: '需为正整数',
       invalidTemperature: '需在 0–2 之间',
-      effortMismatch: '当前模型不支持该思考强度：请重选下拉中的档位，或清空以继承默认。',
+      effortMismatch: '当前模型不支持思考强度「{effort}」：请在下拉中重新选择。',
       roleOracle: '架构 / 攻坚 / 代码审查（只读）',
       roleDesigner: 'UI/UX 与视觉实现（可写）',
       roleFixer: '代码实现、修复与重构（可写）',
@@ -284,6 +298,7 @@ window.__ModuleLoader__.load({
       model: 'Model',
       effort: 'Reasoning effort',
       effortNoneHint: 'Does not send reasoningEffort; use this for models that do not support effort control.',
+      effortPlaceholder: 'Select\u2026',
       advanced: 'Advanced',
       advancedWarn: 'Avoid changing these defaults; they can alter plugin behavior.',
       maxTokens: 'Max tokens',
@@ -304,7 +319,7 @@ window.__ModuleLoader__.load({
       currentValueTag: 'Current',
       invalidMaxTokens: 'Must be a positive integer',
       invalidTemperature: 'Must be between 0 and 2',
-      effortMismatch: 'This model does not support the selected reasoning effort: pick one from the list, or clear it to inherit the default.',
+      effortMismatch: 'This model does not support the reasoning effort "{effort}": pick another level from the list.',
       roleOracle: 'Architecture / hard problems / code review (read-only)',
       roleDesigner: 'UI/UX and visual implementation (writable)',
       roleFixer: 'Code implementation, fixes, and refactoring (writable)',
@@ -916,7 +931,10 @@ window.__ModuleLoader__.load({
       const role = draft.roles[roleId];
       const locked = roleId === 'observer';
       const effortOptions = effortOptionsFor(groups, role.provider, role.model);
-      const effortBad = effortMismatch(role.effort, groups, role.provider, role.model);
+      // A switched-off role is never dispatched, so a stale effort its model
+      // cannot take is not an error: observer ships disabled, and letting it
+      // fail this check would lock the whole card on any model without "high".
+      const effortBad = effortGatesSave(role, groups);
       const descKey = COUNCIL_DESC_KEYS[roleId] ?? `role${roleId[0].toUpperCase()}${roleId.slice(1)}`;
       const invalid = {
         maxTokens: role.maxTokens !== undefined && role.maxTokens !== '' && parseAdvancedNumber(role.maxTokens, 'maxTokens') === null,
@@ -949,10 +967,18 @@ window.__ModuleLoader__.load({
             }),
           ),
           React.createElement('select', {
-            value: role.effort ?? '', disabled: locked, 'aria-label': t('effort'),
+            // The select must never display a level the configuration does not
+            // hold. With `value` absent from the options the browser falls back
+            // to the FIRST option, which is exactly how the card showed "none"
+            // while the stored value was still "max": the error line and the
+            // control disagreed, and re-picking "none" did not fire a change.
+            // A mismatched value now renders the placeholder instead, and the
+            // error line names the level the configuration still holds.
+            value: effortBad ? '' : (role.effort ?? ''), disabled: locked, 'aria-label': t('effort'),
             onChange: (e) => onChange(roleId, { effort: e.target.value === '' ? undefined : e.target.value }),
             style: { ...controlStyle, width: 120, flex: 'none' },
           },
+            React.createElement('option', { value: '', disabled: effortBad }, t('effortPlaceholder')),
             effortOptions.map((option) => React.createElement('option', { key: option.value, value: option.value }, option.label)),
           ),
           React.createElement('button', {
@@ -962,7 +988,8 @@ window.__ModuleLoader__.load({
           }, renderIcon(ui, ICON_CHEVRON, { size: 14, style: { transform: advOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s' } })),
         ),
         role.effort === 'none' ? React.createElement('div', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('effortNoneHint')) : null,
-        effortBad ? React.createElement('div', { style: { fontSize: 12, lineHeight: '16px', color: 'var(--dsw-alias-state-error-primary)' } }, t('effortMismatch')) : null,
+        effortBad ? React.createElement('div', { style: { fontSize: 12, lineHeight: '16px', color: 'var(--dsw-alias-state-error-primary)' } },
+          t('effortMismatch').replace('{effort}', String(role.effort))) : null,
         locked ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12 } },
           renderIcon(ui, ICON_WARNING, { size: 14 }), t('observerLocked')) : null,
         advOpen ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, borderTop: `1px solid ${color.border}`, paddingTop: 8 } },
@@ -1130,9 +1157,12 @@ window.__ModuleLoader__.load({
         return parseAdvancedNumber(role.maxTokens, 'maxTokens') === null
           || parseAdvancedNumber(role.temperature, 'temperature') === null
           || personaAppendInvalid(role.personaAppend)
-          // A stored effort the selected model cannot take (e.g. flash+medium)
-          // blocks saving until reselected or cleared (clear = inherit).
-          || effortMismatch(role.effort, models.groups, role.provider, role.model);
+          // A stored effort the selected model cannot take (e.g. flash+max)
+          // blocks saving until it is reselected — but only for a role that
+          // will be dispatched. A disabled role never sends its effort, so
+          // failing here (observer ships disabled) would lock the whole card
+          // on any model that does not offer that level.
+          || effortGatesSave(role, models.groups);
       });
 
       const changeRole = (roleId, patch) => {
@@ -1718,6 +1748,7 @@ window.__ModuleLoader__.load({
     exports.buildDraft = buildDraft;
     exports.effortOptionsFor = effortOptionsFor;
     exports.effortMismatch = effortMismatch;
+    exports.effortGatesSave = effortGatesSave;
     exports.initialProfileRoster = initialProfileRoster;
     exports.normalizeProfileRoster = normalizeProfileRoster;
     exports.mergeProfileConfig = mergeProfileConfig;

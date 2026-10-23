@@ -66,6 +66,52 @@ check(typeof card.planUserOps === 'function' && typeof card.buildDraft === 'func
 check(source.includes("const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'max'];"), 'effort options include explicit none mode');
 check(source.includes('effortNoneHint'), 'none mode carries a compatibility explanation');
 
+// Issue #9: a stored effort the selected model cannot take used to render as
+// the FIRST option (the browser falls back to option 0 when `value` matches no
+// option), so the card showed "none" while the configuration still held "max".
+// The error line and the control disagreed, and re-picking "none" fired no
+// change event — the only escape was picking an unrelated level first.
+const thirdParty = [{
+  id: 'third-party', name: 'Third party',
+  models: [{
+    id: 'v4-flash', name: 'v4-flash',
+    reasoning: { efforts: [{ id: 'off' }, { id: 'low' }, { id: 'medium' }, { id: 'high' }] },
+  }],
+}];
+check(card.effortMismatch('max', thirdParty, 'third-party', 'v4-flash') === true,
+  'a four-level model rejects a stored "max"');
+check(!card.effortOptionsFor(thirdParty, 'third-party', 'v4-flash').some((option) => option.value === 'max'),
+  'the dropdown offers only the levels the selected model declares');
+check(card.effortMismatch('high', thirdParty, 'third-party', 'v4-flash') === false,
+  'a declared level is accepted');
+const noReasoning = [{ id: 'plain', name: 'Plain', models: [{ id: 'text-only', name: 'text-only' }] }];
+check(card.effortOptionsFor(noReasoning, 'plain', 'text-only').map((option) => option.value).join(',') === 'none',
+  'a model without reasoning declares only "none"');
+check(card.effortMismatch('high', noReasoning, 'plain', 'text-only') === true,
+  'a reasoning-less model reports a stored level as unsupported');
+check(source.includes("value: effortBad ? '' : (role.effort ?? '')"),
+  'a mismatched effort renders the placeholder instead of a false selection');
+check(source.includes("disabled: effortBad }, t('effortPlaceholder')"),
+  'the placeholder cannot be re-picked (a no-op change would hide the error)');
+check(source.includes("t('effortMismatch').replace('{effort}', String(role.effort))"),
+  'the error line names the level the configuration still holds');
+// The save gate is a pure decision so it can be asserted directly: a disabled
+// role must never gate the card (observer ships disabled with effort "high").
+const gateRole = (patch) => ({ enabled: true, provider: 'third-party', model: 'v4-flash', effort: 'max', ...patch });
+check(typeof card.effortGatesSave === 'function', 'effortGatesSave exported for tests');
+check(card.effortGatesSave(gateRole({}), thirdParty) === true,
+  'an enabled role with an unsupported level gates saving');
+check(card.effortGatesSave(gateRole({ enabled: false }), thirdParty) === false,
+  'a disabled role never gates saving');
+check(card.effortGatesSave(gateRole({ effort: 'high' }), thirdParty) === false,
+  'a supported level does not gate saving');
+check(card.effortGatesSave({ provider: 'third-party', model: 'v4-flash', effort: 'max' }, thirdParty) === true,
+  'an absent enabled flag means enabled');
+check(source.includes('const effortBad = effortGatesSave(role, groups)'),
+  'the row renders the same gate decision as the save check');
+check(source.includes('|| effortGatesSave(role, models.groups)'),
+  'the save check uses the shared gate decision');
+
 // ------------------------------------------------------- apply + slot wiring
 console.log('\n[apply: card registration]');
 function runApply(cardExports) {

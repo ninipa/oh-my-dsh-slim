@@ -4,6 +4,29 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.4] — Effort compatibility when a role model changes
+
+Patch release fixing [ninipa/oh-my-dsh-slim#9](https://github.com/ninipa/oh-my-dsh-slim/issues/9),
+where switching a role to a model with a narrower effort vocabulary produced an error the user could
+not clear from the card.
+
+- **The dropdown no longer shows a level the configuration does not hold.** A stored effort the
+  selected model does not declare matched no `<option>`, so the browser rendered the FIRST option:
+  the card showed `none` while the save would have written `max`, and re-picking `none` fired no
+  change event. The mismatched value now renders a disabled "Select…" placeholder, and the error
+  line names the stored level, so one pick clears it.
+- **A switched-off role no longer gates saving.** The check runs only for roles that will be
+  dispatched; `observer` ships disabled with `high`, and a model without that level used to lock
+  every save in the card.
+- **First mount degrades instead of failing.** `subagent-roles` validates the saved effort on every
+  child request, not only when the route changes. A level the mounted model does not offer is
+  dropped (the model default runs) with one warning per role/route/level; metadata that cannot be
+  read still keeps the saved level (fail-open). This covers configuration the card cannot gate — an
+  older profile, a hand-edited document, or a model whose declaration changed.
+- **Verification.** 166 tests (160 pass, 6 skipped, 0 fail); `T0`; two mutation checks confirm the
+  new assertions fail when the guard is removed. `test/model-switch-smoke.cjs` gained a first-mount
+  act and a supported-level act (run against an installed host).
+
 ## [0.8.3] — Live role model changes
 
 Patch release making a saved role model take effect on the current conversation,

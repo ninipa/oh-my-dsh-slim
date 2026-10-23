@@ -13,6 +13,13 @@
 // fork. Invalid configuration fails visibly, matching the upstream loader;
 // an unidentified child receives the upstream high/0.1 fallback.
 //
+// An effort the mounted model does not offer is the one exception: it degrades
+// (dropped, model default used) with a warning instead of failing the request.
+// The settings card blocks such a value on save, so this path only serves
+// configuration written outside the card — an older profile, a hand-edited
+// document, or a model whose declaration changed. Failing there would turn an
+// upgrade into "the subagent stopped working" with no way to run it.
+//
 // The route is also resolved per request: when the saved role model differs
 // from the one the child inherited at mount, this listener reroutes the
 // child's next request. That is what makes a card edit apply to an existing
@@ -32,11 +39,6 @@ export const inject = ['llm', 'loader'];
 /** The orchestrator's own temperature, applied when the host resolved none. */
 const ORCHESTRATOR_TEMPERATURE = 0.1;
 
-
-/** Effective role facts per (role, provider, model, effort) — model metadata is
- * stable for the life of a registration, and a verdict that could not be
- * determined is deliberately not cached. */
-const effortCache = new Map();
 
 /** Effort fallbacks already reported, so a live model switch warns once per
  * (role, route, effort) instead of on every child request. */
@@ -62,42 +64,23 @@ function roleFacts(ctx, agent) {
 }
 
 /**
- * Validate one effort against the model's declared reasoning efforts.
+ * Report a configured effort the target model does not offer, once per
+ * (role, route, effort).
  *
- * The host rejects an undeclared effort at dispatch time with
- * `provider "..." model "..." does not support reasoning effort "..."`; failing
- * here instead names the role and the fix, and keeps the misconfiguration out
- * of the child's first request.
- * @throws when the model declares its efforts and the configured one is absent.
+ * This is a degradation, not a failure: the request runs on the model default
+ * instead of being rejected at dispatch. It fires for configuration the card
+ * could not gate — an old profile saved before the model-scoped dropdown
+ * existed, a hand-edited document, or a model whose declaration changed — so
+ * the warning is the only trace outside the settings card.
  */
-async function verifyEffort(ctx, provider, model, effort, source) {
-  if (!text(provider) || !text(model)) return;
-  let llm;
-  try { llm = ctx.get('llm'); } catch { return; }
-  if (llm === undefined || typeof llm.resolveModelInfo !== 'function') return;
-  const key = provider + '|' + model + '|' + effort;
-  const cached = effortCache.get(key);
-  if (cached !== undefined) return;
-  let info;
-  try {
-    info = await llm.resolveModelInfo(provider, model, undefined);
-  } catch (error) {
-    // Upstream metadata lookup fails open; dispatch owns provider failures.
-    return;
-  }
-  const declared = info?.reasoning;
-  if (declared === undefined || !Array.isArray(declared.efforts) || declared.efforts.length === 0) return;
-  const ids = declared.efforts.map((entry) => String(entry?.id));
-  if (ids.includes(effort)) {
-    effortCache.set(key, true);
-    return;
-  }
-  const withDefault = text(declared.defaultEffort) ? [...ids, 'default: ' + declared.defaultEffort] : ids;
-  throw new Error(
-    'oh-my-dsh-slim: reasoning effort "' + effort + '" is not offered by "' + provider + '/' + model + '".' +
-    ' Declared efforts: ' + withDefault.join(', ') + '.' +
-    " Fix the role's effort in the preset configuration (" +
-    (text(source) ? source : 'the oh-my-dsh-slim configuration file') + ').',
+function warnEffortFallback(ctx, facts, target, effort, declared) {
+  const key = facts.roleId + '|' + target.provider + '|' + target.model + '|' + effort;
+  if (effortWarnings.has(key)) return;
+  effortWarnings.add(key);
+  ctx.logger?.warn?.(
+    'oh-my-dsh-slim: role "' + facts.roleId + '" effort "' + effort + '" is not offered by "' +
+    target.provider + '/' + target.model + '"; using the model default.' +
+    (declared.length > 0 ? ' Declared: ' + declared.join(', ') + '.' : ' The model declares no reasoning efforts.'),
   );
 }
 
@@ -121,7 +104,10 @@ function routeChanged(target, resolved) {
  * advisory (as upstream): a transient or unknown failure must not break a
  * request that could still run on the route the host already resolved, so the
  * failure is reported and the caller keeps the current route. */
-async function resolveRoute(ctx, target, facts) {
+async function resolveRoute(ctx, target, facts, silent = false) {
+  // A fixture without a resolved provider/model has nothing to look up; the
+  // caller keeps the route it already has instead of issuing a dead request.
+  if (!text(target?.provider) || !text(target?.model)) return undefined;
   let llm;
   try { llm = ctx.get('llm'); } catch { return undefined; }
   if (llm === undefined || typeof llm.resolveModelInfo !== 'function') return undefined;
@@ -129,11 +115,11 @@ async function resolveRoute(ctx, target, facts) {
     return await llm.resolveModelInfo(target.provider, target.model, undefined);
   } catch (error) {
     const key = facts.roleId + '|' + target.provider + '|' + target.model;
-    if (!routeWarnings.has(key)) {
+    if (!silent && !routeWarnings.has(key)) {
       routeWarnings.add(key);
       ctx.logger?.warn?.(
-        'oh-my-dsh-slim: role "' + facts.roleId + '" is configured for "' + target.provider + '/' + target.model +
-        '", but its metadata is unavailable; keeping the current route.' +
+        'oh-my-dsh-slim: role "' + facts.roleId + '": metadata is unavailable; keeping the current route (' +
+        target.provider + '/' + target.model + ').' +
         (text(error?.message) ? ' (' + error.message + ')' : ''),
       );
     }
@@ -177,10 +163,16 @@ async function requestConfig(ctx, payload, resolved) {
 
   const target = targetRoute(configured, resolved);
   const changed = routeChanged(target, resolved);
-  const info = changed ? await resolveRoute(ctx, target, facts) : undefined;
-  // A route whose metadata cannot be read is not rerouted: metadata lookup is
-  // advisory, and breaking a request that still has a working route is worse
-  // than leaving the live configuration unapplied for this request.
+  const effort = configured.effort;
+  const effortRequested = text(effort) && effort !== 'none';
+  // Metadata answers two questions: whether the saved route differs from the
+  // one the host resolved (reroute), and whether the saved effort is one that
+  // route offers. A failed lookup is advisory for both — it must not break a
+  // request that can still run.
+  const info = changed || effortRequested ? await resolveRoute(ctx, target, facts) : undefined;
+  // A route whose metadata cannot be read is not rerouted: breaking a request
+  // that still has a working route is worse than leaving the live
+  // configuration unapplied for this request.
   const reroute = changed && info !== undefined;
   const patch = {};
   let dropEffort = false;
@@ -188,38 +180,46 @@ async function requestConfig(ctx, payload, resolved) {
   if (reroute) {
     patch.provider = target.provider;
     patch.model = target.model;
-
-    const declared = declaredEfforts(info);
-    const effort = configured.effort;
-    if (effort !== undefined && effort !== 'none' && declared !== undefined && !declared.includes(effort)) {
-      // The new route does not offer the old effort. Falling back to the model
-      // default keeps the rescue switch valid instead of failing the request.
-      dropEffort = true;
-      const key = facts.roleId + '|' + target.provider + '|' + target.model + '|' + effort;
-      if (!effortWarnings.has(key)) {
-        effortWarnings.add(key);
-        ctx.logger?.warn?.(
-          'oh-my-dsh-slim: role "' + facts.roleId + '" effort "' + effort + '" is not offered by "' +
-          target.provider + '/' + target.model + '"; using the model default. Declared: ' + declared.join(', ') + '.',
-        );
-      }
-    } else if (effort !== undefined && effort !== 'none') {
-      patch.reasoningEffort = effort;
-    } else {
-      // The inherited effort belonged to the old route; keeping it is what
-      // breaks a switch to a model with a different effort vocabulary.
-      dropEffort = true;
-    }
-
     if (typeof info?.defaultMaxTokens === 'number' && typeof resolved?.maxTokens === 'number' && info.defaultMaxTokens < resolved.maxTokens) {
       patch.maxTokens = info.defaultMaxTokens;
     }
-  } else if (configured.effort !== undefined && configured.effort !== 'none' && configured.effort !== resolved?.reasoningEffort) {
-    // Same route (or metadata unavailable): keep the pre-existing strict check,
-    // because an effort the configured model does not offer is a configuration
-    // error, and a failed lookup is not evidence that the route is wrong.
-    await verifyEffort(ctx, resolved?.provider, resolved?.model, configured.effort, facts?.source);
-    patch.reasoningEffort = configured.effort;
+  }
+
+  // The effort lands on the route the request will actually run on: the
+  // rerouted target when the reroute is possible, otherwise the route the host
+  // already resolved (a failed target lookup leaves the request where it was).
+  // The second lookup is silent — the first one already reported the outage.
+  const effortRoute = !effortRequested
+    ? undefined
+    : reroute || !changed
+      ? target
+      : { provider: resolved?.provider, model: resolved?.model };
+  const effortInfo = effortRoute === undefined || effortRoute === target
+    ? info
+    : await resolveRoute(ctx, effortRoute, facts, true);
+
+  if (effortRequested) {
+    // `effortInfo === undefined` means the lookup failed: keep the saved level
+    // and let the host judge it (fail-open, matching the reroute decision
+    // above). Metadata without declared efforts means the model has no effort
+    // control, so no explicit level is supported.
+    const declared = declaredEfforts(effortInfo);
+    const supported = effortInfo === undefined ? undefined : (declared ?? []).includes(effort);
+    if (supported === false) {
+      // The saved level belongs to a model this route replaced, or it was
+      // written outside the card (an old profile, a hand-edited document, a
+      // model whose declaration changed). Dropping it keeps the request
+      // runnable on the model default instead of failing at dispatch; the
+      // settings card still reports the mismatch as the visible fix point.
+      dropEffort = true;
+      warnEffortFallback(ctx, facts, effortRoute, effort, declared ?? []);
+    } else if (effort !== resolved?.reasoningEffort) {
+      patch.reasoningEffort = effort;
+    }
+  } else if (reroute) {
+    // The inherited effort belonged to the old route; keeping it is what
+    // breaks a switch to a model with a different effort vocabulary.
+    dropEffort = true;
   }
 
   if (configured.temperature !== undefined && configured.temperature !== resolved?.temperature) {

@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.3 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.4 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -19,9 +19,11 @@
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
 
-> **0.8.3（2026-10-22）：角色模型热生效。** 在设置卡片里改角色模型并保存后，当前会话的
-> 下一次委派即使用新模型，无需新开会话。effort 会按新模型重新校验（不支持的强度降级为
-> 模型默认值），输出上限按新模型收敛。完整说明见 [CHANGELOG.md](./CHANGELOG.md)。
+> **0.8.4（2026-10-23）：换角色模型时的思考强度兼容。** 思考强度下拉不再显示配置里并不存在的档位：
+> 已保存但不被新模型支持的档位会显示为「请选择」占位项，红字点名该档位，重选后一次点击即可生效。
+> 已禁用的角色不再阻塞保存；已保存但挂载模型不支持的档位，会在请求时降级并写一条 warn，
+> 而不是让委派失败。修复 [#9](https://github.com/ninipa/oh-my-dsh-slim/issues/9)。
+> 完整说明见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 角色与委派
 
@@ -75,7 +77,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.8.3
+oh-my-dsh-slim@0.8.4
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -85,7 +87,7 @@ oh-my-dsh-slim@0.8.3
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.3
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.4
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：

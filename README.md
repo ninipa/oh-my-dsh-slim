@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.3 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.4 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -24,11 +24,12 @@ directory to copy.
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
 
-> **0.8.3 (2026-10-22): live role model changes.** Saving a role's model in the settings card
-> now applies to the next delegation in the current conversation, without starting a new session.
-> Effort is re-validated against the new model (an unsupported level falls back to the model
-> default) and the output cap is clamped to the new model's limit. See
-> [CHANGELOG.md](./CHANGELOG.md) for the full release notes.
+> **0.8.4 (2026-10-23): effort compatibility when a role model changes.** The effort dropdown no
+> longer shows a level the saved configuration does not contain: an unsupported stored level renders
+> the "Select…" placeholder, the error names it, and re-picking a level takes effect in one click. A
+> switched-off role no longer blocks saving, and a stored level the mounted model does not offer is
+> dropped with a warning at request time instead of failing the delegation. Fixes
+> [#9](https://github.com/ninipa/oh-my-dsh-slim/issues/9). See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Roles and delegation
 
@@ -100,7 +101,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.3
+oh-my-dsh-slim@0.8.4
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -110,7 +111,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.3
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.4
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules
