@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
     // no build step or package metadata, so this is a literal; T0 and
     // client-card.test.mjs compare it with package.json so a release bump
     // cannot silently leave the header stale.
-    const VERSION = '0.8.4';
+    const VERSION = '0.8.5';
     const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
@@ -93,6 +93,79 @@ window.__ModuleLoader__.load({
         });
       }
       return options;
+    }
+
+    /**
+     * Display label for one effort option.
+     *
+     * The plugin's `none` token means "do not specify": the request keeps the
+     * session-resolved level, or the adapter default when the session has none.
+     * Rendering the raw token made it read like a model level (`off` is the
+     * level that actually disables thinking), so the dropdown names the
+     * behaviour instead. `off` is the adapter's explicit "no reasoning" level
+     * and reads as such. Other adapter-declared levels keep the catalog label.
+     */
+    function effortLabel(option, t) {
+      if (option?.value === 'none') return t('effortInherit');
+      if (option?.value === 'off') return t('effortOff');
+      return option?.label;
+    }
+
+    /**
+     * The value the effort select must display.
+     *
+     * `undefined` and `none` are the same runtime state ("send no level"), so an
+     * unset role must SELECT the follow-session option rather than falling
+     * through to the placeholder — otherwise the control shows "Select…" while
+     * the configuration is simply "unspecified" (the issue-#9 failure mode).
+     * A stored level the selected model does not declare selects the disabled
+     * placeholder, and the error line names the level.
+     */
+    function effortSelectValue(role, effortBad) {
+      return effortBad ? '' : (role?.effort ?? 'none');
+    }
+
+    /**
+     * Whether a role carries its own model route. A route is both halves or
+     * neither (issue #11); the same predicate decides display, persistence and
+     * which spawn-time controls still apply.
+     */
+    function roleRouted(role) {
+      return typeof role?.provider === 'string' && role.provider !== ''
+        && typeof role?.model === 'string' && role.model !== '';
+    }
+
+    /**
+     * The explanatory line under an effort control set to `none`.
+     *
+     * `none` means "send no level", and the outcome depends on the route: an
+     * inherited route keeps the session's effort (the host merges the parent's
+     * resolved level into the child), while a pinned route makes the host drop
+     * that inherited level, leaving the model's own default. Only the
+     * inheriting case follows the session, so the line must say which one
+     * applies instead of claiming both.
+     * @returns a locale key, or undefined when the effort is not `none`.
+     */
+    function effortHintKey(role) {
+      if (role?.effort !== 'none') return undefined;
+      return roleRouted(role) ? 'effortModelDefaultHint' : 'effortFollowHint';
+    }
+
+    /**
+     * The role patch applied when the model dropdown changes.
+     *
+     * Choosing "inherit" is the default coupling: the role's own effort AND
+     * output-token cap are cleared in the SAME edit, so "follow the model"
+     * cannot leave a stale route-bound value behind for the next session's
+     * main model. The user can pin them again afterwards. Picking a concrete
+     * model keeps whatever the row already has.
+     */
+    function roleModelPatch(provider, model) {
+      const routed = typeof provider === 'string' && provider !== ''
+        && typeof model === 'string' && model !== '';
+      return routed
+        ? { provider, model }
+        : { provider: undefined, model: undefined, effort: 'none', maxTokens: undefined };
     }
 
     /**
@@ -202,15 +275,20 @@ window.__ModuleLoader__.load({
     // ---------------------------------------------------------------- locale
     const zh = {
       desc: '专家角色Subagent委派预设和设置。',
-      orchestratorNote: 'orchestrator 即当前会话主模型：在对话输入框的模型选择器中更换，默认模型在 设置-模型 维护。',
+      orchestratorNote: 'orchestrator 即当前会话主模型：在对话输入框的模型选择器中更换，默认模型在 设置-模型 维护。未单独选模型/档位的角色跟随它；固定档位不被主模型支持时会在委派时退回会话档位。',
       enabled: '启用',
       model: '模型',
+      modelInherit: '继承会话模型（跟随主模型）',
       effort: '思考强度',
-      effortNoneHint: '不向模型传递 reasoningEffort 参数，适用于不支持思考强度的模型。',
+      effortInherit: '跟随会话（不指定）',
+      effortOff: '关闭思考',
+      effortFollowHint: '使用主对话当前的思考档位：主对话换档后，下一次委派自动跟随，无需新建会话。',
+      effortModelDefaultHint: '使用该模型自己的默认思考档位。',
       effortPlaceholder: '请选择',
       advanced: '高级',
       advancedWarn: '非必要不要修改默认值，可能改变插件行为。',
       maxTokens: 'token 上限',
+      maxTokensFollowHint: '跟随会话模型时，输出上限由主对话决定；固定模型后可单独设置。',
       temperature: '温度',
       observerLocked: '本版本锁定：待上游支持委派附件转发（deepseek-harness #4297）后重新评估。',
       save: '保存',
@@ -293,15 +371,20 @@ window.__ModuleLoader__.load({
     };
     const en = {
       desc: 'Expert-role subagent delegation preset and settings.',
-      orchestratorNote: 'The orchestrator is the session\u2019s main model: change it in the composer\u2019s model picker; defaults live in Settings \u2192 Models.',
+      orchestratorNote: 'The orchestrator is the session\u2019s main model: change it in the composer\u2019s model picker; defaults live in Settings \u2192 Models. Roles without their own model or level follow it; a fixed level the model does not offer falls back to the session\u2019s level.',
       enabled: 'Enabled',
       model: 'Model',
+      modelInherit: 'Inherit session model (follows the main model)',
       effort: 'Reasoning effort',
-      effortNoneHint: 'Does not send reasoningEffort; use this for models that do not support effort control.',
+      effortInherit: 'Follow session (unspecified)',
+      effortOff: 'Thinking off',
+      effortFollowHint: 'Uses the main conversation\u2019s current effort; a later change applies to the next delegation, no new session needed.',
+      effortModelDefaultHint: 'Uses the model\u2019s own default effort.',
       effortPlaceholder: 'Select\u2026',
       advanced: 'Advanced',
       advancedWarn: 'Avoid changing these defaults; they can alter plugin behavior.',
       maxTokens: 'Max tokens',
+      maxTokensFollowHint: 'With an inherited model the main conversation decides the output cap; pin a model to set it here.',
       temperature: 'Temperature',
       observerLocked: 'Locked in this version: re-evaluate once upstream forwards attachments into delegated subagents (deepseek-harness #4297).',
       save: 'Save',
@@ -424,10 +507,18 @@ window.__ModuleLoader__.load({
         const presetRole = value?.presets?.[presetName]?.[roleId] ?? {};
         const baseRole = basePreset[roleId] ?? {};
         const adv = advanced?.roles?.[roleId] ?? base?.advanced?.roles?.[roleId] ?? {};
+        // A route is provider AND model, or neither (issue #11). A half route
+        // is unreachable — never pair one provider's id with another
+        // provider's model — so the editor renders it as "inherit" and the
+        // next save clears both fields.
+        const provider = presetRole.provider ?? baseRole.provider;
+        const model = presetRole.model ?? baseRole.model;
+        const routed = typeof provider === 'string' && provider !== ''
+          && typeof model === 'string' && model !== '';
         roles[roleId] = {
           enabled: presetRole.enabled ?? baseRole.enabled ?? true,
-          provider: presetRole.provider ?? baseRole.provider,
-          model: presetRole.model ?? baseRole.model,
+          provider: routed ? provider : undefined,
+          model: routed ? model : undefined,
           effort: presetRole.effort ?? baseRole.effort,
           maxTokens: adv.maxTokens,
           temperature: adv.temperature,
@@ -881,33 +972,54 @@ window.__ModuleLoader__.load({
     };
 
     function ModelSelect({ groups, status, provider, model, onChange, disabled, t }) {
-      const known = groups.some((g) => g.id === provider && g.models.some((m) => m.id === model));
+      // A route is BOTH halves or neither (issue #11). A provider without a
+      // model cannot describe a reachable target, and filling the missing half
+      // from the session would pair one provider id with another provider's
+      // model id; such a value renders — and saves — as "inherit".
+      const routed = typeof provider === 'string' && provider !== ''
+        && typeof model === 'string' && model !== '';
+      const known = routed && groups.some((g) => g.id === provider && g.models.some((m) => m.id === model));
       // Select values are the synthetic "<provider>/<modelId>" — the current
       // value must use the SAME form or the browser falls back to the first
       // option (found in GUI acceptance: oracle showed Flash instead of Pro).
-      const synthetic = known || (provider !== undefined && model !== undefined)
-        ? `${provider}/${model}`
-        : '';
-      const options = [];
-      if (!known && model !== undefined) {
+      const synthetic = routed ? `${provider}/${model}` : '';
+      const options = [
+        // Inherit is a first-class choice, not an empty state: it is what each
+        // role runs on until the user pins a model, and the only way BACK after
+        // pinning one. It stays available while the catalog loads, because
+        // following the session model needs no catalog at all.
+        React.createElement('option', { key: 'inherit', value: '' }, t('modelInherit')),
+      ];
+      if (routed && !known) {
         options.push(React.createElement('option', { key: 'current', value: synthetic }, `${t('currentValueTag')}: ${synthetic}`));
       }
       for (const group of groups) {
         options.push(React.createElement('optgroup', { key: group.id, label: group.name },
           group.models.map((m) => React.createElement('option', { key: m.id, value: `${group.id}/${m.id}` }, m.name || m.id))));
       }
+      // Catalog state is a NOTICE, not the selected value. The old placeholder
+      // doubled as both, so an inheriting role (or any role on a host that
+      // exposes no catalog) looked like an installation with no providers.
+      const notice = status === 'loading' ? t('modelsLoading')
+        : status === 'error' ? t('modelsError')
+          : groups.length === 0 ? t('modelsEmpty') : undefined;
+      if (notice !== undefined) {
+        options.push(React.createElement('option', { key: 'catalog', value: '__catalog__', disabled: true }, notice));
+      }
       return React.createElement('select', {
         value: synthetic, disabled,
         onChange: (e) => {
-          if (!known && e.target.value === synthetic) return;
           const next = e.target.value;
+          // Clearing BOTH halves is what "inherit" persists as: the bundled
+          // profile writes two `unset` ops, a custom profile omits both fields,
+          // and the host then resolves the session's own model.
+          if (next === '') { onChange(undefined, undefined); return; }
+          if (!known && next === synthetic) return;
           const slash = next.indexOf('/');
+          if (slash < 0) return;
           onChange(next.slice(0, slash), next.slice(slash + 1));
         }, style: { ...controlStyle, appearance: 'auto' },
-      },
-        synthetic === '' ? React.createElement('option', { value: '' }, status === 'loading' ? t('modelsLoading') : status === 'error' ? t('modelsError') : t('modelsEmpty')) : null,
-        options,
-      );
+      }, options);
     }
 
     /** The roster dropdown: existing profiles (default marker on the selected
@@ -935,6 +1047,8 @@ window.__ModuleLoader__.load({
       // cannot take is not an error: observer ships disabled, and letting it
       // fail this check would lock the whole card on any model without "high".
       const effortBad = effortGatesSave(role, groups);
+      const hintKey = effortHintKey(role);
+      const routed = roleRouted(role);
       const descKey = COUNCIL_DESC_KEYS[roleId] ?? `role${roleId[0].toUpperCase()}${roleId.slice(1)}`;
       const invalid = {
         maxTokens: role.maxTokens !== undefined && role.maxTokens !== '' && parseAdvancedNumber(role.maxTokens, 'maxTokens') === null,
@@ -963,7 +1077,7 @@ window.__ModuleLoader__.load({
           React.createElement('div', { style: { flex: '1 1 auto', minWidth: 0 } },
             React.createElement(ModelSelect, {
               groups, status: modelsStatus, provider: role.provider, model: role.model, disabled: locked,
-              onChange: (provider, model) => onChange(roleId, { provider, model }), t,
+              onChange: (provider, model) => onChange(roleId, roleModelPatch(provider, model)), t,
             }),
           ),
           React.createElement('select', {
@@ -973,13 +1087,16 @@ window.__ModuleLoader__.load({
             // while the stored value was still "max": the error line and the
             // control disagreed, and re-picking "none" did not fire a change.
             // A mismatched value now renders the placeholder instead, and the
-            // error line names the level the configuration still holds.
-            value: effortBad ? '' : (role.effort ?? ''), disabled: locked, 'aria-label': t('effort'),
+            // error line names the level the configuration still holds. The
+            // placeholder exists only for that mismatch: with no mismatch an
+            // unset role selects the follow-session option, so the placeholder
+            // is neither shown nor selectable.
+            value: effortSelectValue(role, effortBad), disabled: locked, 'aria-label': t('effort'),
             onChange: (e) => onChange(roleId, { effort: e.target.value === '' ? undefined : e.target.value }),
             style: { ...controlStyle, width: 120, flex: 'none' },
           },
-            React.createElement('option', { value: '', disabled: effortBad }, t('effortPlaceholder')),
-            effortOptions.map((option) => React.createElement('option', { key: option.value, value: option.value }, option.label)),
+            effortBad ? React.createElement('option', { value: '', disabled: true }, t('effortPlaceholder')) : null,
+            effortOptions.map((option) => React.createElement('option', { key: option.value, value: option.value }, effortLabel(option, t))),
           ),
           React.createElement('button', {
             type: 'button', 'aria-label': t('advanced'), 'aria-expanded': advOpen,
@@ -987,7 +1104,7 @@ window.__ModuleLoader__.load({
             style: { background: 'none', border: 'none', cursor: 'pointer', color: color.tertiary, padding: 4, flex: 'none' },
           }, renderIcon(ui, ICON_CHEVRON, { size: 14, style: { transform: advOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s' } })),
         ),
-        role.effort === 'none' ? React.createElement('div', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('effortNoneHint')) : null,
+        hintKey ? React.createElement('div', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t(hintKey)) : null,
         effortBad ? React.createElement('div', { style: { fontSize: 12, lineHeight: '16px', color: 'var(--dsw-alias-state-error-primary)' } },
           t('effortMismatch').replace('{effort}', String(role.effort))) : null,
         locked ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12 } },
@@ -996,7 +1113,7 @@ window.__ModuleLoader__.load({
           React.createElement('div', { style: { display: 'flex', gap: 12 } },
             React.createElement(Field, { label: t('maxTokens') },
               React.createElement(ui.Input, {
-                value: role.maxTokens ?? '', placeholder: ' ', inputMode: 'numeric', disabled: locked,
+                value: role.maxTokens ?? '', placeholder: ' ', inputMode: 'numeric', disabled: locked || !routed,
                 onChange: (e) => onChange(roleId, { maxTokens: e.target.value }), style: controlStyle,
               })),
             React.createElement(Field, { label: t('temperature') },
@@ -1005,6 +1122,7 @@ window.__ModuleLoader__.load({
                 onChange: (e) => onChange(roleId, { temperature: e.target.value }), style: controlStyle,
               })),
           ),
+          !routed ? React.createElement('span', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('maxTokensFollowHint')) : null,
           COUNCIL_ROLE_IDS.includes(roleId) ? React.createElement(Field, { label: t('personaAppend') },
             React.createElement('textarea', {
               value: role.personaAppend ?? '', rows: 3, placeholder: t('personaAppendHint'), disabled: locked,
@@ -1747,6 +1865,10 @@ window.__ModuleLoader__.load({
     exports.planUserOps = planUserOps;
     exports.buildDraft = buildDraft;
     exports.effortOptionsFor = effortOptionsFor;
+    exports.effortLabel = effortLabel;
+    exports.effortSelectValue = effortSelectValue;
+    exports.effortHintKey = effortHintKey;
+    exports.roleModelPatch = roleModelPatch;
     exports.effortMismatch = effortMismatch;
     exports.effortGatesSave = effortGatesSave;
     exports.initialProfileRoster = initialProfileRoster;
@@ -1758,6 +1880,7 @@ window.__ModuleLoader__.load({
     exports.createProfileAdapter = createProfileAdapter;
     exports.unwrapProfileRpc = unwrapProfileRpc;
     exports.ProfileSelect = ProfileSelect;
+    exports.ModelSelect = ModelSelect;
     exports.canSetDefault = canSetDefault;
     exports.canDeleteProfile = canDeleteProfile;
     exports.deleteErrorKey = deleteErrorKey;

@@ -6,13 +6,14 @@ const BASE = 'deepseek-official';
 const PRO = 'deepseek-v4-pro';
 const QWEN = 'openrouter/qwen3-coder';
 
-function harness({ profiles, info }) {
+function harness({ profiles, info, agents }) {
   const handlers = [];
   const warnings = [];
   const ctx = {
     logger: { warn: (...args) => warnings.push(args.join(' ')) },
     get: (key) => {
       if (key === 'omdsProfiles') return { read: (id) => profiles[id] };
+      if (key === 'agents') return agents;
       if (key === 'llm') {
         return {
           resolveModelInfo: async (provider, model) => {
@@ -30,20 +31,32 @@ function harness({ profiles, info }) {
   return { ctx, handlers, warnings };
 }
 
-function child(roleId) {
+function child(roleId, parentId) {
   return {
     session: {
-      header: { origin: 'subagent', delegationDepth: 1 },
+      header: {
+        origin: 'subagent',
+        delegationDepth: 1,
+        ...(parentId === undefined ? {} : { parentSession: parentId }),
+      },
       ownEvents: () => [{ type: 'subagent/descriptor', data: { persona: 'Internal role id: oh-my-dsh-slim-role:' + roleId + '.' } }],
     },
   };
 }
 
-async function run({ profiles, info, roleId = 'oracle', agent = child(roleId), resolved }) {
-  const { ctx, handlers, warnings } = harness({ profiles, info });
+/** A live delegating agent: the child's "follow the session" source. */
+function parentAgent(config) {
+  return { session: { requestHeader: () => ({ config }) } };
+}
+
+async function run({ profiles, info, roleId = 'oracle', agent, resolved, parent, parentId = 'parent-session' }) {
+  const agents = parent === undefined && parentId === undefined
+    ? undefined
+    : { get: (id) => (id === parentId ? parentAgent(parent) : undefined) };
+  const { ctx, handlers, warnings } = harness({ profiles, info, agents });
   apply(ctx, { profileId: 'p' });
   assert.equal(handlers.length, 1);
-  const result = await handlers[0]({ agent }, async () => resolved);
+  const result = await handlers[0]({ agent: agent ?? child(roleId, parent === undefined ? undefined : parentId) }, async () => resolved);
   return { result, warnings };
 }
 
@@ -58,6 +71,130 @@ test('an unchanged role route leaves the request untouched', async () => {
   assert.deepEqual(result, resolved);
 });
 
+test('a role switched to follow mid-session returns to the session route', async () => {
+  // The librarian case: the role tool mounted while the role was pinned, so
+  // its spawn options still carry that route. A card edit to "inherit" must
+  // apply to the NEXT request, not only to sessions created later — otherwise
+  // the child keeps running on a model the user already removed.
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1, maxTokens: 48000 };
+  const { result } = await run({
+    profiles: profile({ effort: 'none', temperature: 0.1 }),
+    info: { [QWEN]: { reasoning: { efforts: [{ id: 'low' }] }, defaultMaxTokens: 64000 } },
+    resolved,
+    parent: { provider: 'openrouter', model: 'qwen3-coder', reasoningEffort: 'low', maxTokens: 32000 },
+  });
+  assert.equal(result.provider, 'openrouter', 'the session route replaces the stale pin');
+  assert.equal(result.model, 'qwen3-coder');
+  assert.equal(result.reasoningEffort, 'low', 'the session level comes with the route');
+  assert.equal(result.maxTokens, 32000, 'the session cap comes with it too');
+});
+
+test('a followed session reroutes even when the role has its own effort', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 48000 };
+  const { result } = await run({
+    profiles: profile({ effort: 'max', temperature: 0.1 }),
+    info: { [QWEN]: { reasoning: { efforts: [{ id: 'high' }, { id: 'max' }] } } },
+    resolved,
+    parent: { provider: 'openrouter', model: 'qwen3-coder', reasoningEffort: 'low', maxTokens: 32000 },
+  });
+  assert.equal(result.provider, 'openrouter');
+  assert.equal(result.reasoningEffort, 'max', 'a role level still wins over the session level');
+  assert.equal(result.maxTokens, 32000, 'the cap follows the session regardless');
+});
+
+test('a followed session level change applies without a route change', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 48000 };
+  const { result } = await run({
+    profiles: profile({ effort: 'none', temperature: 0.1 }),
+    resolved,
+    parent: { provider: BASE, model: PRO, reasoningEffort: 'high', maxTokens: 131072 },
+  });
+  assert.equal(result.provider, BASE, 'the route is unchanged');
+  assert.equal(result.reasoningEffort, 'high', 'the level follows the session');
+  assert.equal(result.maxTokens, 131072, 'the cap follows the session');
+});
+
+test('a followed role drops a level the session no longer sends', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1, maxTokens: 48000 };
+  const { result } = await run({
+    profiles: profile({ effort: 'none', temperature: 0.1 }),
+    resolved,
+    parent: { provider: BASE, model: PRO },
+  });
+  assert.equal('reasoningEffort' in result, false, 'no stale level survives');
+  assert.equal('maxTokens' in result, false, 'no stale cap survives');
+});
+
+test('a followed role keeps its resolved route when the parent is gone', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1, maxTokens: 48000 };
+  const { result } = await run({
+    profiles: profile({ effort: 'none', temperature: 0.1 }),
+    resolved,
+    parentId: 'missing-parent',
+  });
+  assert.deepEqual(result, resolved, 'an unreadable parent falls back to the existing route');
+});
+
+test('half a configured route follows the parent instead of pinning half a route', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1, maxTokens: 48000 };
+  const { result } = await run({
+    profiles: profile({ model: 'orphan-model', effort: 'none', temperature: 0.1 }),
+    info: { [QWEN]: { reasoning: { efforts: [{ id: 'low' }] } } },
+    resolved,
+    parent: { provider: 'openrouter', model: 'qwen3-coder', reasoningEffort: 'low', maxTokens: 32000 },
+  });
+  assert.equal(result.provider, 'openrouter', 'the half route is ignored and the session route applies');
+  assert.equal(result.model, 'qwen3-coder');
+});
+
+test('a followed role keeps the resolved values when the session route cannot be verified', async () => {
+  // A model switch the registrar cannot resolve must not copy the parent's
+  // level or cap onto the route the request will actually run on.
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 48000 };
+  const { result, warnings } = await run({
+    profiles: profileFor('designer', { effort: 'none', temperature: 0.1 }),
+    info: {},
+    resolved,
+    roleId: 'designer',
+    parent: { provider: 'openrouter', model: 'qwen3-coder', reasoningEffort: 'low', maxTokens: 32000 },
+  });
+  assert.deepEqual(result, resolved, 'no session value travels onto an unverified route');
+  assert.match(warnings.join('\n'), /metadata is unavailable/);
+});
+
+test('a role with no route keeps the session route and applies only its own knobs', async () => {
+  // Issue #11: this is the shipped default — no provider/model means the child
+  // follows the session's main model, while the role's effort/temperature still
+  // apply. The saved effort is checked against the SESSION route's metadata.
+  const resolved = { provider: 'session-provider', model: 'session-model', reasoningEffort: 'high', temperature: 0.1, maxTokens: 64000 };
+  const { result, warnings } = await run({
+    profiles: profile({ effort: 'low', temperature: 0.2 }),
+    info: { 'session-provider/session-model': { reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } } },
+    resolved,
+  });
+  assert.equal(result.provider, 'session-provider', 'the inherited route is untouched');
+  assert.equal(result.model, 'session-model', 'the inherited model is untouched');
+  assert.equal(result.reasoningEffort, 'low', 'the role effort still applies');
+  assert.equal(result.temperature, 0.2, 'the role temperature still applies');
+  assert.equal(result.maxTokens, 64000, 'maxTokens is left to the session route');
+  assert.deepEqual(warnings, []);
+});
+
+test('half a configured route never reroutes the child', async () => {
+  // A model without its provider (or the reverse) cannot describe a target;
+  // pairing it with the session's other half would cross providers.
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1 };
+  for (const half of [{ model: 'orphan-model' }, { provider: 'orphan-provider' }]) {
+    const { result } = await run({
+      profiles: profile({ ...half, effort: 'none' }),
+      info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'max' }] } } },
+      resolved,
+    });
+    assert.equal(result.provider, BASE, JSON.stringify(half) + ': provider stays the session route');
+    assert.equal(result.model, PRO, JSON.stringify(half) + ': model stays the session route');
+  }
+});
+
 test('a saved route change reroutes the next child request', async () => {
   const { result } = await run({
     profiles: profile({ provider: 'openrouter', model: 'qwen3-coder', effort: 'max', temperature: 0.1 }),
@@ -68,6 +205,31 @@ test('a saved route change reroutes the next child request', async () => {
   assert.equal(result.model, 'qwen3-coder');
   assert.equal('reasoningEffort' in result, false);
   assert.equal(result.maxTokens, 32000);
+});
+
+test('an unsupported role effort falls back to the session effort, not the model default', async () => {
+  // The issue-#11 scenario: the role follows the main model and keeps its own
+  // effort (oracle = max). A new session runs a main model without "max" — the
+  // request must land on the session's own level, which that model does declare.
+  const resolved = { provider: 'session-p', model: 'session-m', reasoningEffort: 'high', temperature: 0.1, maxTokens: 64000 };
+  const { result, warnings } = await run({
+    profiles: profile({ provider: 'session-p', model: 'session-m', effort: 'max', temperature: 0.1 }),
+    info: { 'session-p/session-m': { reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } } },
+    resolved,
+  });
+  assert.equal(result.reasoningEffort, 'high', 'the session level survives instead of an arbitrary model default');
+  assert.match(warnings.join('\n'), /using the session effort "high"/);
+});
+
+test('a session effort the model cannot take still degrades to the model default', async () => {
+  const resolved = { provider: 'session-p', model: 'session-m', reasoningEffort: 'max', temperature: 0.1 };
+  const { result, warnings } = await run({
+    profiles: profile({ provider: 'session-p', model: 'session-m', effort: 'xhigh', temperature: 0.1 }),
+    info: { 'session-p/session-m': { reasoning: { efforts: [{ id: 'low' }] } } },
+    resolved,
+  });
+  assert.equal('reasoningEffort' in result, false, 'both levels are undeclared, so the model default runs');
+  assert.match(warnings.join('\n'), /using the model default/);
 });
 
 test('an effort the new model offers is carried over', async () => {
@@ -259,14 +421,29 @@ test('a saved effort change applies on an unchanged route', async () => {
   assert.equal(result.reasoningEffort, 'low');
 });
 
-test('an unsupported saved effort drops the inherited level instead of keeping it', async () => {
-  const { result } = await run({
+test('an unsupported saved effort keeps the inherited level when the model declares it', async () => {
+  // Issue #11: "follow the model" should land on what the session itself runs
+  // with, not an arbitrary model default. The inherited level is only kept
+  // after the target model's declaration confirms it.
+  const { result, warnings } = await run({
     profiles: profileFor('designer', { provider: BASE, model: PRO, effort: 'max', temperature: 0.1 }),
     info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } } },
     resolved: { provider: BASE, model: PRO, reasoningEffort: 'low', temperature: 0.1 },
     roleId: 'designer',
   });
-  assert.equal('reasoningEffort' in result, false, 'the model default is used, not the stale level');
+  assert.equal(result.reasoningEffort, 'low', 'the inherited level is kept instead of the model default');
+  assert.match(warnings.join('\n'), /using the session effort "low"/);
+});
+
+test('an unsupported saved effort drops the inherited level when that is undeclared too', async () => {
+  const { result, warnings } = await run({
+    profiles: profileFor('designer', { provider: BASE, model: PRO, effort: 'max', temperature: 0.1 }),
+    info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'medium' }] } } },
+    resolved: { provider: BASE, model: PRO, reasoningEffort: 'high', temperature: 0.1 },
+    roleId: 'designer',
+  });
+  assert.equal('reasoningEffort' in result, false, 'the model default is used, not a stale level');
+  assert.match(warnings.join('\n'), /using the model default/);
 });
 
 test('an unsupported effort warns once per role, route and level', async () => {

@@ -94,8 +94,30 @@ const log = (...args) => console.log('[model-switch-smoke]', ...args);
       ctx.inject(['llm', 'agents', 'subagents', 'systemPrompt'], async (c) => {
         try {
           c.llm.registerAdapter(['fake'], new FakeAdapter());
-          const parent = (await c.agents.create({ sessionId: 'model-switch-root-' + randomUUID(), meta: { cwd: process.cwd() } })).agent;
+          const rootId = 'model-switch-root-' + randomUUID();
+          const parent = (await c.agents.create({ sessionId: rootId, meta: { cwd: process.cwd() } })).agent;
           parent.options = { ...parent.options, provider: 'fake', model: 'route-a', reasoningEffort: 'max', maxTokens: 128000 };
+
+          // The "follow the session" path reads three host primitives on every
+          // child request: the child's parentSession, the live agents registry,
+          // and the parent's request header. Pin them here (on a separate
+          // parent so the pinned-route scenario above keeps its own header) so
+          // a host change fails this smoke instead of silently sending
+          // followers back to their mount-time route.
+          const followRootId = 'model-switch-follow-root-' + randomUUID();
+          const followParent = await c.agents.create({ sessionId: followRootId, meta: { cwd: process.cwd() } });
+          followParent.agent.session.append('request/header', {
+            header: { config: { provider: 'fake', model: 'route-follow', reasoningEffort: 'high', maxTokens: 32000 } },
+            reason: 'initial',
+          });
+          assert.equal(followParent.agent.session.requestHeader()?.config?.model, 'route-follow', 'the parent header is readable');
+          assert.equal(c.agents.get(followRootId), followParent.agent, 'the agents registry resolves a session id back to its agent');
+          const probe = await c.agents.create({
+            sessionId: 'model-switch-child-' + randomUUID(),
+            parentAgent: followParent.agent,
+            meta: { cwd: process.cwd(), parentSession: followRootId, origin: 'subagent', delegationDepth: 1 },
+          });
+          assert.equal(probe.agent.session.header.parentSession, followRootId, 'a child session records its parent');
 
           const request = async () => {
             const wait = new Promise((done, fail) => {

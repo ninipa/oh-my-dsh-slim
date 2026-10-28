@@ -158,13 +158,17 @@ async function rpc(method, payload = {}) {
     const settingsRow = settings.describe().find(row => row.ns === 'oh-my-dsh-slim');
     assert.ok(settingsRow, 'oh-my-dsh-slim settings namespace must be served');
     const bundledPreset = settingsRow.value.preset;
-    await settings.mutate('oh-my-dsh-slim', [{ op: 'set', path: ['presets', bundledPreset, 'oracle', 'model'], value: 'smoke-bundled-save' }], settingsRow.revision);
+    await settings.mutate('oh-my-dsh-slim', [
+      { op: 'set', path: ['presets', bundledPreset, 'oracle', 'provider'], value: 'smoke-p' },
+      { op: 'set', path: ['presets', bundledPreset, 'oracle', 'model'], value: 'smoke-bundled-save' },
+    ], settingsRow.revision);
     const bundledAfter = settings.describe().find(row => row.ns === 'oh-my-dsh-slim');
+    assert.equal(bundledAfter.value.presets[bundledPreset].oracle.provider, 'smoke-p');
     assert.equal(bundledAfter.value.presets[bundledPreset].oracle.model, 'smoke-bundled-save');
     console.log('WEB_BUNDLED_SETTINGS_SAVE_PASS');
-    const created = await rpc('profile-create', { displayName: 'HTTP Named A', config: { roles: { oracle: { model: 'http-a', effort: 'none' } } } }); assert.equal(created.ok, true);
+    const created = await rpc('profile-create', { displayName: 'HTTP Named A', config: { roles: { oracle: { provider: 'smoke-p', model: 'http-a', effort: 'none' } } } }); assert.equal(created.ok, true);
     const first = created.value;
-    const saved = await rpc('profile-save', { id: first.id, expectedRevision: first.revision, config: { roles: { oracle: { model: 'http-saved' } } } }); assert.equal(saved.ok, true);
+    const saved = await rpc('profile-save', { id: first.id, expectedRevision: first.revision, config: { roles: { oracle: { provider: 'smoke-p', model: 'http-saved' } } } }); assert.equal(saved.ok, true);
     const stale = await rpc('profile-save', { id: first.id, expectedRevision: first.revision, config: {} }); assert.equal(stale.ok, false); assert.equal(stale.error.code, 'PROFILE_CONFLICT');
     const defaulted = await rpc('profile-set-default', { profileId: first.id }); assert.equal(defaulted.ok, true, JSON.stringify(defaulted));
     const migrated = await rpc('profile-migrate', { profileId: first.id }); assert.equal(migrated.ok, true); assert.equal(migrated.value.changed, false);

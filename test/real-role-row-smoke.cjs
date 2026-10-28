@@ -21,6 +21,16 @@ const anchor = process.env.DSH_HOST_ANCHOR;
 if (!anchor || !path.isAbsolute(anchor)) throw new Error('Set DSH_HOST_ANCHOR to an absolute installed DSH host JS entry');
 const requireHost = createRequire(anchor);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'omds-real-role-'));
+// The preset resolves bare `@deepseek-ai/*` imports through the host loader
+// against this profile's base URL. A bare temp profile has no node_modules, so
+// link the installed host's scope in; the desktop runtime does this through
+// `bareModuleBaseUrl`, which an npm-installed host exposes only at boot.
+fs.mkdirSync(path.join(temporary, 'node_modules'), { recursive: true });
+fs.symlinkSync(
+  path.join(path.dirname(requireHost.resolve('@deepseek-ai/dsh/package.json')), '..'),
+  path.join(temporary, 'node_modules', '@deepseek-ai'),
+  'dir',
+);
 process.env.DSH_HOME = temporary;
 delete process.env.DSH_PROFILE;
 process.argv[1] = anchor;

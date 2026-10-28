@@ -65,32 +65,74 @@ function roleFacts(ctx, agent) {
 
 /**
  * Report a configured effort the target model does not offer, once per
- * (role, route, effort).
+ * (role, route, effort, fallback).
  *
- * This is a degradation, not a failure: the request runs on the model default
+ * This is a degradation, not a failure: the request runs on the session's own
+ * effort when that model declares it, and on the model default otherwise,
  * instead of being rejected at dispatch. It fires for configuration the card
- * could not gate — an old profile saved before the model-scoped dropdown
- * existed, a hand-edited document, or a model whose declaration changed — so
- * the warning is the only trace outside the settings card.
+ * could not gate — an inherited route whose session model changed, an old
+ * profile saved before the model-scoped dropdown existed, a hand-edited
+ * document, or a model whose declaration changed — so the warning is the only
+ * trace outside the settings card.
  */
-function warnEffortFallback(ctx, facts, target, effort, declared) {
-  const key = facts.roleId + '|' + target.provider + '|' + target.model + '|' + effort;
+function warnEffortFallback(ctx, facts, target, effort, declared, fallback) {
+  const key = facts.roleId + '|' + target.provider + '|' + target.model + '|' + effort + '|' + (fallback ?? '');
   if (effortWarnings.has(key)) return;
   effortWarnings.add(key);
   ctx.logger?.warn?.(
     'oh-my-dsh-slim: role "' + facts.roleId + '" effort "' + effort + '" is not offered by "' +
-    target.provider + '/' + target.model + '"; using the model default.' +
+    target.provider + '/' + target.model + '"; ' +
+    (fallback === undefined
+      ? 'using the model default.'
+      : 'using the session effort "' + fallback + '".') +
     (declared.length > 0 ? ' Declared: ' + declared.join(', ') + '.' : ' The model declares no reasoning efforts.'),
   );
 }
 
-/** Resolve the route this request should use: the role's configured model when
- * present, otherwise whatever the host already resolved. */
-function targetRoute(configured, resolved) {
-  return {
-    provider: text(configured?.provider) ? configured.provider : resolved?.provider,
-    model: text(configured?.model) ? configured.model : resolved?.model,
-  };
+/**
+ * The route the delegating session is running right now, or undefined.
+ *
+ * A child session persists its `parentSession` in the header, and the parent
+ * agent keeps its latest request header — the same source the host reads when
+ * it resolves a child at spawn (`parentAgentOptionsForDelegation`). Re-reading
+ * it per request is what makes "follow the session model" survive a main-model
+ * switch inside a running conversation: the child's spawn options keep the
+ * route that was current when the role tool was mounted, which is exactly the
+ * value this function replaces.
+ */
+function parentRoute(ctx, agent) {
+  const parentId = agent?.session?.header?.parentSession;
+  if (!text(parentId)) return undefined;
+  let agents;
+  try { agents = ctx.get('agents'); } catch { return undefined; }
+  try {
+    const parent = typeof agents?.get === 'function' ? agents.get(parentId) : undefined;
+    const config = parent?.session?.requestHeader?.()?.config;
+    if (!text(config?.provider) || !text(config?.model)) return undefined;
+    return config;
+  } catch {
+    // A disposed or half-torn-down parent must not break the child's request:
+    // falling back to the resolved route is the pre-existing behaviour.
+    return undefined;
+  }
+}
+
+/** Resolve the route this request should use: the role's configured provider
+ * AND model when both are present, otherwise the delegating session's current
+ * route, otherwise whatever the host already resolved.
+ * Half a route (only one of the two) is treated as "no route" for the same
+ * reason roles.js omits it: pairing one provider id with another provider's
+ * model id would produce a target nobody asked for. Roles ship without a route
+ * (issue #11), so following the session is the default path: the parent's live
+ * header is what the child would have inherited had it been created now. */
+function targetRoute(configured, resolved, parent) {
+  if (text(configured?.provider) && text(configured?.model)) {
+    return { provider: configured.provider, model: configured.model };
+  }
+  if (text(parent?.provider) && text(parent?.model)) {
+    return { provider: parent.provider, model: parent.model };
+  }
+  return { provider: resolved?.provider, model: resolved?.model };
 }
 
 /** A route change is only meaningful when the host resolved both halves; a
@@ -144,6 +186,13 @@ function declaredEfforts(info) {
  * configured route differs from the one resolved at mount (because the user
  * changed the card after the session started) is rerouted here, so saving the
  * card takes effect on the current conversation instead of only the next one.
+ *
+ * A role WITHOUT a route follows the delegating session, and that route is
+ * re-read from the parent's live request header on every request as well. The
+ * spawn options alone cannot express "follow": they carry the route that was
+ * current when this role tool mounted, so a main-model switch inside a running
+ * conversation would silently leave the child on the old model — the same
+ * class of staleness the pinned-route reroute above already fixes.
  * @returns the next config, or undefined when the request needs no change.
  */
 async function requestConfig(ctx, payload, resolved) {
@@ -161,7 +210,12 @@ async function requestConfig(ctx, payload, resolved) {
     return Object.keys(patch).length === 0 ? undefined : { ...resolved, ...patch };
   }
 
-  const target = targetRoute(configured, resolved);
+  // A role without its own route follows the delegating session. The parent's
+  // header is the route this child would inherit if it were created now; the
+  // spawn options are only the mount-time snapshot of the same source.
+  const following = !(text(configured.provider) && text(configured.model));
+  const parent = following ? parentRoute(ctx, payload.agent) : undefined;
+  const target = targetRoute(configured, resolved, parent);
   const changed = routeChanged(target, resolved);
   const effort = configured.effort;
   const effortRequested = text(effort) && effort !== 'none';
@@ -174,8 +228,14 @@ async function requestConfig(ctx, payload, resolved) {
   // that still has a working route is worse than leaving the live
   // configuration unapplied for this request.
   const reroute = changed && info !== undefined;
+  // The session values may only travel with the session route. When the target
+  // lookup fails, the request stays on the route the host resolved, and copying
+  // the parent's level or cap onto another model is exactly the kind of
+  // mismatch this row exists to prevent.
+  const onSessionRoute = parent !== undefined && (!changed || reroute);
   const patch = {};
   let dropEffort = false;
+  let dropMaxTokens = false;
 
   if (reroute) {
     patch.provider = target.provider;
@@ -208,13 +268,31 @@ async function requestConfig(ctx, payload, resolved) {
     if (supported === false) {
       // The saved level belongs to a model this route replaced, or it was
       // written outside the card (an old profile, a hand-edited document, a
-      // model whose declaration changed). Dropping it keeps the request
-      // runnable on the model default instead of failing at dispatch; the
-      // settings card still reports the mismatch as the visible fix point.
-      dropEffort = true;
-      warnEffortFallback(ctx, facts, effortRoute, effort, declared ?? []);
+      // model whose declaration changed). Prefer the level the child inherited
+      // from the session: on an inherited route that is the main model's own
+      // effort, so "follow the model" lands on what the session actually runs
+      // with instead of an arbitrary model default. A pinned route (where the
+      // inherited value IS the unsupported saved level) or a level the session
+      // model also cannot use falls back to the model default. Either way the
+      // request stays runnable; the card remains the visible fix point.
+      const inherited = resolved?.reasoningEffort;
+      const fallback = text(inherited) && inherited !== effort && (declared ?? []).includes(inherited)
+        ? inherited
+        : undefined;
+      if (fallback === undefined) dropEffort = true;
+      warnEffortFallback(ctx, facts, effortRoute, effort, declared ?? [], fallback);
     } else if (effort !== resolved?.reasoningEffort) {
       patch.reasoningEffort = effort;
+    }
+  } else if (following && onSessionRoute) {
+    // No role level: inherit the session's level verbatim. The parent header
+    // is what the main model actually sends, so the value is supported by
+    // construction — unlike the spawn snapshot, which can belong to a model
+    // the session has since replaced.
+    if (text(parent.reasoningEffort)) {
+      if (parent.reasoningEffort !== resolved?.reasoningEffort) patch.reasoningEffort = parent.reasoningEffort;
+    } else if (resolved?.reasoningEffort !== undefined) {
+      dropEffort = true;
     }
   } else if (reroute) {
     // The inherited effort belonged to the old route; keeping it is what
@@ -222,13 +300,25 @@ async function requestConfig(ctx, payload, resolved) {
     dropEffort = true;
   }
 
+  // The output cap follows the same rule: a followed session carries the
+  // session's own cap (valid for the model that owns it), while a pinned route
+  // keeps the role budget clamped to the target model above.
+  if (following && onSessionRoute) {
+    if (typeof parent.maxTokens === 'number') {
+      if (parent.maxTokens !== resolved?.maxTokens) patch.maxTokens = parent.maxTokens;
+    } else if (resolved?.maxTokens !== undefined) {
+      dropMaxTokens = true;
+    }
+  }
+
   if (configured.temperature !== undefined && configured.temperature !== resolved?.temperature) {
     patch.temperature = configured.temperature;
   }
 
-  if (Object.keys(patch).length === 0 && !dropEffort) return undefined;
+  if (Object.keys(patch).length === 0 && !dropEffort && !dropMaxTokens) return undefined;
   const next = { ...resolved, ...patch };
   if (dropEffort) delete next.reasoningEffort;
+  if (dropMaxTokens) delete next.maxTokens;
   return next;
 }
 

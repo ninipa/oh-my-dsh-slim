@@ -4,6 +4,69 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.5] — Roles inherit the session model by default
+
+Patch release implementing [ninipa/oh-my-dsh-slim#11](https://github.com/ninipa/oh-my-dsh-slim/issues/11):
+subagents follow the session's main model unless the user pins one for a role, matching the
+oh-my-opencode-slim default.
+
+- **No shipped route, no shipped effort.** `defaults.json` no longer sets `provider`/`model` OR
+  `effort` on the six delegation roles (deny, mcps and the council family are unchanged). A fresh
+  install delegates on the session's model and effort; pinning, say, oracle to a stronger model or
+  a deeper level stays a per-profile choice.
+- **"Inherit session model" is a first-class option.** The role model dropdown starts with it, so
+  an unconfigured role shows what it actually does instead of the catalog notice ("no models
+  found…"), which is now a disabled entry rather than the selected value. Picking it clears BOTH
+  halves — the only way back from a model pinned earlier — and, as default coupling, sets the
+  role's effort to "follow" in the same edit, so a stale fixed level cannot meet the next main
+  model.
+- **A route is provider AND model, or neither.** `config.js` drops a half route (notifying once
+  per role on stderr), `roles.js` forwards `agentOptions.provider`/`model` only as a pair, and
+  `subagent-roles` keeps the host-resolved route when either half is missing — one provider's id
+  is never paired with another provider's model id.
+- **Effort rides the route, and degrades instead of failing.** A role's effort is no longer
+  pinned into the child's spawn options when the role inherits its model; it is applied per
+  request. The host preflights spawn-time child options against the effective model and rejects
+  the delegation on an unsupported level, so a new session on a main model without the role's
+  level used to fail the tool call outright. Now a supported level is applied, an unsupported one
+  falls back to the session's own level when that model declares it, and only then to the model
+  default — with one warning. Pinned routes may still carry an explicit level to the host (the
+  card validates it against that exact model). The dropdown's `none` entry reads "Follow session
+  (unspecified)" and `off` reads "Thinking off" — the raw tokens looked like model levels, while
+  only `off` actually disables thinking. Its explanatory line is route-aware: an inherited route
+  follows the session level, a pinned route uses the model default (the host drops the inherited
+  level on a route change). The "Select…" row is now a disabled mismatch marker rendered only
+  when the stored level is missing from the selected model's declarations; it can no longer be
+  picked as a way to clear the setting. The same rule now covers `maxTokens`: an inherited route
+  leaves the session's own output cap in place (the card disables the advanced field), while a
+  pinned route keeps the role's budget. Temperature, tools, prompts and MCP stay per role.
+- **Following is live, not just for new sessions.** A role with no route re-reads the delegating
+  session's current route, effort and output cap from the parent's request header on every
+  request (the child session records `parentSession`; the header is the same source the host uses
+  to resolve a child at spawn). Without this, the role tool's mount-time `agentOptions` would keep
+  the old pin for the whole conversation, so switching a role to "inherit" looked like a no-op
+  until a new session. The pinned-route reroute already worked this way; following now matches it.
+  A missing or unreadable parent falls back to the route the host already resolved.
+- **Upgrade.** Profiles and JSON documents that pin a route or a level keep them. Roles left
+  unpinned — and levels left unset — follow the session model and effort after upgrading; no
+  migration step. Switching a role to "inherit" in the card clears its fixed level.
+- **Verification.** 179 tests (179 pass / 0 skipped against an installed host; 173 pass /
+  6 skipped without one) and `T0`. The card gained issue-#11
+  checks (inherit option, clearing both halves, half-route drafts, catalog notice);
+  `package.test` pins the new default and the half-route drop; `host-smoke`/`web-host-smoke` now
+  pin pairs so they exercise a valid route. `model-switch.test` covers mid-session following
+  (route, level and cap adopted from the parent; stale values dropped; unreadable parent
+  tolerated). Every smoke passes on three host lines — 0.2.0-rc.2, 0.2.1-rc.2 and 0.2.1-rc.3 —
+  namely `host-smoke`, `role-composition`, `council`, `council-resume`, `real-role-row`,
+  `model-switch` and `web-host` (all `WEB_*` sentinels). `model-switch-smoke` also pins the three
+  host primitives the follow path reads: `parentSession`, `agents.get`, the parent request header.
+  The smoke harness now links the installed host's `@deepseek-ai` scope into its temp profile;
+  without it every bare host import resolved against an empty profile and `host-smoke` stopped at
+  version detection — the 0.8.4 baseline failed identically, which is what proved the gap was
+  harness-only rather than a product regression. Desktop verification: three live delegations
+  across two main-model switches of the same conversation followed the session route, effort and
+  output cap.
+
 ## [0.8.4] — Effort compatibility when a role model changes
 
 Patch release fixing [ninipa/oh-my-dsh-slim#9](https://github.com/ninipa/oh-my-dsh-slim/issues/9),

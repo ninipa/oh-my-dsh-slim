@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.4 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.5 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -24,6 +24,15 @@ directory to copy.
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
 
+> **0.8.5 (2026-10-28): roles inherit the session model by default.** The package no longer
+> pins provider/model or a fixed effort for the six roles: a subagent follows the session's main
+> model and effort unless you pick one for that role. The model dropdown's first entry, "Inherit
+> session model", clears both route halves and switches the effort back to follow. A route needs
+> both halves; a half route is ignored with a startup notice. **Following is live**: switching a
+> role back to inherit inside a running conversation applies to its next request — model, effort
+> and output cap — without starting a new session. Fixes
+> [#11](https://github.com/ninipa/oh-my-dsh-slim/issues/11). See [CHANGELOG.md](./CHANGELOG.md).
+
 > **0.8.4 (2026-10-23): effort compatibility when a role model changes.** The effort dropdown no
 > longer shows a level the saved configuration does not contain: an unsupported stored level renders
 > the "Select…" placeholder, the error names it, and re-picking a level takes effect in one click. A
@@ -33,18 +42,33 @@ retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
 
 ## Roles and delegation
 
-| Role | Tool | Default model | Effort | Permissions |
+| Role | Tool | Model | Effort | Permissions |
 |---|---|---|---|---|
-| oracle | subagent_oracle | deepseek-v4-pro | max | read-only |
-| designer | subagent_designer | deepseek-v4-flash | high | writable |
-| fixer | subagent_fixer | deepseek-v4-flash | high | writable |
-| explorer | subagent_explorer | deepseek-v4-flash | low | read-only |
-| librarian | subagent_librarian | deepseek-v4-flash | high | read-only + role-scoped MCP |
+| oracle | subagent_oracle | inherit session model | follow session | read-only |
+| designer | subagent_designer | inherit session model | follow session | writable |
+| fixer | subagent_fixer | inherit session model | follow session | writable |
+| explorer | subagent_explorer | inherit session model | follow session | read-only |
+| librarian | subagent_librarian | inherit session model | follow session | read-only + role-scoped MCP |
 
 - oracle handles architecture, debugging and review; designer handles UI/UX; fixer handles
   bounded implementation; explorer handles codebase reconnaissance; librarian handles external research.
-- Shipped models route through `deepseek-official`; configure an imported provider/model to use
-  another route. Real model calls require the relevant provider credentials.
+- **The model follows the session's main model by default** (0.8.5): no provider/model is shipped.
+  Picking a model in the card pins that role; the first dropdown entry, "Inherit session model",
+  switches it back. `provider` and `model` must be configured as a pair — half a route is ignored
+  and inherits instead. Following re-reads the main conversation's current configuration on every
+  request, so switching a role back to inherit (or changing the main model) applies to the next
+  delegation without starting a new session. Real model calls require the relevant provider
+  credentials.
+- **Effort follows the session by default too**: no level is shipped; picking one in the card is an
+  override. An override the next main model does not declare never fails the delegation — it falls
+  back to the session's own level when that model declares it, then to the model default, with one
+  warning. The dropdown shows `none` as "Follow session (unspecified)" and `off` as "Thinking off";
+  switching a role back to inherit clears its fixed level in the same edit. A role with a pinned
+  model keeps validating against that model.
+- **The output-token cap follows the route too**: with an inherited model the session/model decides
+  it, so the advanced "Max tokens" field is disabled (pin a model to set it) — a role budget could
+  exceed the new main model's output limit. Temperature, tools, prompts and MCP stay per role:
+  they describe the specialist, not the route.
 - Roles inherit global tools. Read-only roles deny `edit`/`write`; all roles deny control tools
   (`skill`, `job_kill`, `job_list`, `job_output`, `todo_write`, `ask_user_question`).
   Further delegation is disabled (`maxDepth: 1`).
@@ -101,7 +125,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.4
+oh-my-dsh-slim@0.8.5
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -111,7 +135,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.4
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.5
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules
@@ -218,6 +242,9 @@ Both named legacy configurations and compact role overrides remain accepted:
 - Per-role keys include `enabled`, `provider`, `model`, `effort`, `temperature`, `maxTokens`,
   `tools`, `deny`, `mcps`, and `personaAppend`. A nonempty `tools` list is exhaustive; an empty
   list means unconfigured, not "deny all".
+- `provider` and `model` must be configured as a pair. The route in the example above is only an
+  example — none ships any more; omitting both, or setting one half, inherits the session model
+  (a half route is dropped with a startup notice).
 - Effort tokens are shape-checked, not limited to the shipped `off`/`low`/`high`/`max` vocabulary.
   Delegation checks model metadata when changing effort and reports mismatches; metadata lookup
   failure retains the upstream fail-open behavior. `none` preserves the host-resolved effort.

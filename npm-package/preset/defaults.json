@@ -18,9 +18,6 @@
       },
       "oracle": {
         "enabled": true,
-        "provider": "deepseek-official",
-        "model": "deepseek-v4-pro",
-        "effort": "max",
         "deny": [
           "edit",
           "write",
@@ -35,9 +32,6 @@
       },
       "designer": {
         "enabled": true,
-        "provider": "deepseek-official",
-        "model": "deepseek-v4-flash",
-        "effort": "high",
         "deny": [
           "skill",
           "job_kill",
@@ -50,9 +44,6 @@
       },
       "fixer": {
         "enabled": true,
-        "provider": "deepseek-official",
-        "model": "deepseek-v4-flash",
-        "effort": "high",
         "deny": [
           "skill",
           "job_kill",
@@ -65,9 +56,6 @@
       },
       "explorer": {
         "enabled": true,
-        "provider": "deepseek-official",
-        "model": "deepseek-v4-flash",
-        "effort": "low",
         "deny": [
           "edit",
           "write",
@@ -82,9 +70,6 @@
       },
       "librarian": {
         "enabled": true,
-        "provider": "deepseek-official",
-        "model": "deepseek-v4-flash",
-        "effort": "high",
         "deny": [
           "edit",
           "write",
@@ -102,9 +87,6 @@
       },
       "observer": {
         "enabled": false,
-        "provider": "deepseek-official",
-        "model": "deepseek-v4-flash",
-        "effort": "high",
         "deny": [
           "edit",
           "write",

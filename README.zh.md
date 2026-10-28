@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.4 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.5 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -19,6 +19,13 @@
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
 
+> **0.8.5（2026-10-28）：角色默认继承会话模型。** 随包不再给六个角色指定 provider/model，也不固定
+> 思考强度：没有在卡片里选模型时，子代理跟随当前会话的主模型与档位；选了具体模型/档位才算覆盖。
+> 模型下拉的第一项就是「继承会话模型」，选回它即清除两半路由并同时把档位切回跟随。路由必须成对
+> 出现，只有一半的配置会被忽略并写一条提示。**跟随是实时的**：已存在的会话里改回继承，下一次
+> 子代理请求就会改用主对话当前的模型、档位和 token 上限，不必新建会话。修复
+> [#11](https://github.com/ninipa/oh-my-dsh-slim/issues/11)。完整说明见 [CHANGELOG.md](./CHANGELOG.md)。
+
 > **0.8.4（2026-10-23）：换角色模型时的思考强度兼容。** 思考强度下拉不再显示配置里并不存在的档位：
 > 已保存但不被新模型支持的档位会显示为「请选择」占位项，红字点名该档位，重选后一次点击即可生效。
 > 已禁用的角色不再阻塞保存；已保存但挂载模型不支持的档位，会在请求时降级并写一条 warn，
@@ -27,17 +34,27 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 
 ## 角色与委派
 
-| 角色 | 工具 | 默认模型 | effort | 权限 |
+| 角色 | 工具 | 模型 | 思考强度 | 权限 |
 |---|---|---|---|---|
-| oracle | subagent_oracle | deepseek-v4-pro | max | 只读 |
-| designer | subagent_designer | deepseek-v4-flash | high | 可写 |
-| fixer | subagent_fixer | deepseek-v4-flash | high | 可写 |
-| explorer | subagent_explorer | deepseek-v4-flash | low | 只读 |
-| librarian | subagent_librarian | deepseek-v4-flash | high | 只读 + 角色作用域 MCP |
+| oracle | subagent_oracle | 继承会话模型 | 跟随会话 | 只读 |
+| designer | subagent_designer | 继承会话模型 | 跟随会话 | 可写 |
+| fixer | subagent_fixer | 继承会话模型 | 跟随会话 | 可写 |
+| explorer | subagent_explorer | 继承会话模型 | 跟随会话 | 只读 |
+| librarian | subagent_librarian | 继承会话模型 | 跟随会话 | 只读 + 角色作用域 MCP |
 
 - oracle 负责架构、复杂排障与评审；designer 负责 UI/UX；fixer 负责有边界的实现；explorer 负责
   代码勘察；librarian 负责外部调研。
-- 随包模型走 `deepseek-official`。可改成宿主已导入的其他 provider/model；真实请求需对应凭据。
+- **模型默认跟随当前会话的主模型**（0.8.5）：随包不预置 provider/model，在卡片的模型下拉里选一个
+  具体模型才会固定；下拉第一项「继承会话模型」可随时切回。provider 与 model 必须成对配置，只有
+  一半时会被忽略并按继承处理。跟随按**每次请求**重读主对话的当前配置，所以在运行中的会话里改回
+  继承或换主模型，下一次委派就生效，不需要新建会话。真实请求需对应 provider 的凭据。
+- **思考强度默认也跟随会话**：出厂不固定档位，在卡片里选了具体档位才算覆盖。换主模型后档位不被
+  支持时委派仍会成功：先退回会话档位（该模型声明过时），再退回模型默认，并记一条 warn。档位下拉里
+  `none` 显示为「跟随会话（不指定）」、`off` 显示为「关闭思考」；把模型切回继承时，该角色的固定
+  档位会在同一次编辑里自动清为跟随。固定了模型的角色仍按该模型校验。
+- **token 上限也跟随路由**：继承模型时由主对话/该模型决定，卡片「高级」里的 token 上限不可编辑
+  （固定模型后才可单独设置）——按角色写死的预算可能超过新主模型的输出上限。温度、工具、提示词、
+  MCP 等角色属性不跟随，它们与模型能力无关。
 - 角色继承全局工具，只读角色 deny `edit`/`write`；全部角色 deny 控制类工具（`skill`、`job_kill`、
   `job_list`、`job_output`、`todo_write`、`ask_user_question`），禁止继续委派（`maxDepth: 1`）。
 - **observer 预留但强制关闭**：委派提示是纯文本，宿主按主模型视觉能力门控粘贴图片。
@@ -77,7 +94,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.8.4
+oh-my-dsh-slim@0.8.5
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -87,7 +104,7 @@ oh-my-dsh-slim@0.8.4
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.4
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.5
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：
@@ -174,6 +191,8 @@ profile。**这不证明桌面 GUI 已自动渲染角色配置表单**；宿主�
   局部覆盖保留随包角色字段；文档选择阶段数组整体替换，角色 deny 合并以保留限制。
 - 角色键包括 `enabled`、`provider`、`model`、`effort`、`temperature`、`maxTokens`、`tools`、
   `deny`、`mcps`、`personaAppend`。非空 `tools` 为穷举白名单；空数组表示未配置，不是禁止全部工具。
+- `provider` 与 `model` 必须成对出现：上例中的路由只是**示例**（随包不再预置）；省略两者或只写一半
+  都表示继承会话模型，只有一半时会丢弃并写一条启动提示。
 - effort 只校验 token 形状，不限于随包 `off`/`low`/`high`/`max`。委派时检查模型元数据并报告不匹配。
   修改 effort 时校验；模型元信息查询失败保留原版 fail-open 行为。`none` 保留宿主已解析的 effort。
 - 模型、effort 与 temperature 在每次委派请求时重读：保存卡片后，当前会话的下一次子代理请求

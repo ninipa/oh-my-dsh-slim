@@ -168,10 +168,13 @@ test('the bundled defaults reach every role without a user config file', async (
       const role = loaded.roles[roleId];
       const shipped = JSON.parse(readFileSync(join(root, 'npm-package', 'preset', 'defaults.json'), 'utf8'))
         .presets['my-dsh-normal'][roleId];
-      assert.equal(role.provider, shipped.provider, roleId + ': shipped provider');
-      assert.equal(role.model, shipped.model, roleId + ': shipped model');
-      assert.equal(role.effort, shipped.effort, roleId + ': shipped effort');
       assert.deepEqual(role.deny ?? [], shipped.deny ?? [], roleId + ': shipped deny');
+      // Issue #11 (default coupling): no delegation role ships a model route
+      // OR a fixed effort. A fresh install follows both the main model and its
+      // effort until the user pins one of them.
+      assert.equal(role.provider, undefined, roleId + ': no shipped provider (inherits the session model)');
+      assert.equal(role.model, undefined, roleId + ': no shipped model (inherits the session model)');
+      assert.equal(role.effort, undefined, roleId + ': no shipped effort (follows the session effort)');
     }
     assert.deepEqual(loaded.roles.oracle.mcps, []);
     assert.deepEqual(loaded.roles.librarian.mcps, ['context7', 'gh_grep']);
@@ -186,14 +189,15 @@ test('the bundled defaults reach every role without a user config file', async (
 
 test('a partial user override keeps the shipped role settings', async () => {
   const config = await import(pathToFileURL(join(root, 'npm-package', 'preset', 'config.js')).href);
-  // The role layers merge key by key: a user document that names only a model
-  // must not erase the shipped provider, effort and deny list, or a small
-  // override would silently widen a role's tool access.
+  // The role layers merge key by key: a user document that names a route must
+  // not erase the shipped deny list, or a small override would silently widen
+  // a role's tool access. Effort is no longer shipped (default coupling), so a
+  // route-only override leaves the role on the session effort.
   const dir = mkdtempSync(join(tmpdir(), 'omds-config-'));
   const file = join(dir, 'user.json');
   writeFileSync(file, JSON.stringify({
     preset: 'my-dsh-normal',
-    roles: { oracle: { model: 'custom-oracle-model' }, explorer: { enabled: false } },
+    roles: { oracle: { provider: 'local', model: 'custom-oracle-model' }, explorer: { enabled: false } },
   }));
   const previous = {
     OH_MY_DSH_SLIM_CONFIG: process.env.OH_MY_DSH_SLIM_CONFIG,
@@ -205,16 +209,17 @@ test('a partial user override keeps the shipped role settings', async () => {
     config.resetConfigForTests();
     const roles = config.loadConfig().roles;
     assert.equal(roles.oracle.model, 'custom-oracle-model', 'the user model wins');
-    assert.equal(roles.oracle.provider, 'deepseek-official', 'the shipped provider survives');
-    assert.equal(roles.oracle.effort, 'max', 'the shipped effort survives');
+    assert.equal(roles.oracle.provider, 'local', 'the user provider pairs with it');
+    assert.equal(roles.oracle.effort, undefined, 'a route-only override does not invent an effort');
     assert.deepEqual(
       roles.oracle.deny,
       ['edit', 'write', 'skill', 'job_kill', 'job_list', 'job_output', 'todo_write', 'ask_user_question'],
-      'the shipped deny list survives a model-only override',
+      'the shipped deny list survives a route-only override',
     );
     assert.equal(roles.oracle.maxTokens, 128000, 'the runtime floor still applies');
     assert.equal(roles.explorer.enabled, false, 'the user may disable one role');
-    assert.equal(roles.designer.model, 'deepseek-v4-flash', 'untouched roles stay upstream shipped');
+    assert.equal(roles.designer.model, undefined, 'untouched roles inherit the session model');
+    assert.equal(roles.designer.effort, undefined, 'untouched roles inherit the session effort');
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
@@ -225,22 +230,104 @@ test('a partial user override keeps the shipped role settings', async () => {
   }
 });
 
-test('each role carries its shipped route into the host agentOptions', async () => {
+test('half a model route is dropped, so the role inherits the session model', async () => {
+  const config = await import(pathToFileURL(join(root, 'npm-package', 'preset', 'config.js')).href);
+  // Issue #11: a route is provider AND model. A half route cannot describe a
+  // reachable target — pairing it with the session's other half would cross
+  // providers — so it is dropped instead of carried as dead configuration.
+  const dir = mkdtempSync(join(tmpdir(), 'omds-half-route-'));
+  const file = join(dir, 'user.json');
+  writeFileSync(file, JSON.stringify({
+    preset: 'my-dsh-normal',
+    roles: { oracle: { model: 'orphan-model' }, designer: { provider: 'orphan-provider' } },
+  }));
+  const previous = {
+    OH_MY_DSH_SLIM_CONFIG: process.env.OH_MY_DSH_SLIM_CONFIG,
+    OH_MY_DSH_SLIM_PROFILE_DIR: process.env.OH_MY_DSH_SLIM_PROFILE_DIR,
+  };
+  process.env.OH_MY_DSH_SLIM_CONFIG = file;
+  process.env.OH_MY_DSH_SLIM_PROFILE_DIR = dir;
+  try {
+    config.resetConfigForTests();
+    const roles = config.loadConfig().roles;
+    for (const [roleId, dropped] of [['oracle', 'model'], ['designer', 'provider']]) {
+      assert.equal(roles[roleId].provider, undefined, roleId + ': provider dropped with ' + dropped);
+      assert.equal(roles[roleId].model, undefined, roleId + ': model dropped with ' + dropped);
+    }
+    assert.equal(roles.oracle.effort, undefined, 'the rest of the role is untouched (no shipped effort)');
+    assert.deepEqual(roles.oracle.mcps, [], 'the shipped MCP list is untouched');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    config.resetConfigForTests();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a route reaches the host only as a pair; effort only rides a pinned route', async () => {
   const roles = await import(pathToFileURL(join(root, 'npm-package', 'preset', 'roles.js')).href);
   const defaults = JSON.parse(readFileSync(join(root, 'npm-package', 'preset', 'defaults.json'), 'utf8'));
   const shipped = defaults.presets['my-dsh-normal'];
-  // The host reads a child route from agentOptions.reasoningEffort; an effort
-  // kept only in the role document never reaches the delegated model, so every
-  // role would silently run at the parent's effort.
+  // Roles ship no route and no effort (default coupling). With an inherited
+  // route the host would preflight a spawn-time effort against the SESSION
+  // model before creating the child, so a new main model without that level
+  // would reject the delegation outright. Effort is therefore applied per
+  // request by subagent-roles, where a fallback exists; only a pinned route
+  // may carry an explicit effort to the host.
   for (const roleId of roles.roleIds()) {
     const role = roles.resolveRole({ definition: { roleId, persona: 'body' } });
-    assert.equal(role.agentOptions.provider, shipped[roleId].provider, roleId + ': provider reaches the host');
-    assert.equal(role.agentOptions.model, shipped[roleId].model, roleId + ': model reaches the host');
-    assert.equal(role.agentOptions.reasoningEffort, shipped[roleId].effort, roleId + ': effort reaches the host');
-    assert.equal(typeof role.agentOptions.maxTokens, 'number', roleId + ': maxTokens reaches the host');
+    assert.equal(role.agentOptions.provider, undefined, roleId + ': no provider without a shipped route');
+    assert.equal(role.agentOptions.model, undefined, roleId + ': no model without a shipped route');
+    assert.equal(role.agentOptions.reasoningEffort, undefined, roleId + ': no effort without an explicit setting');
+    assert.equal(role.agentOptions.maxTokens, undefined, roleId + ': the output cap follows the session, not the role');
     assert.deepEqual(role.toolFilter.deny, shipped[roleId].deny, roleId + ': deny reaches the tool filter');
   }
   assert.equal(roles.resolveRole({ definition: { roleId: 'oracle', persona: 'body' } }).toolFilter.allow, undefined);
+
+  // A user-pinned route reaches the host as a pair; half a route is ignored
+  // here too (config.js already dropped it, and roles.js re-checks the pair so
+  // a row-level agentOptions half cannot cross routes either). An effort the
+  // user explicitly pinned rides that route.
+  const config = await import(pathToFileURL(join(root, 'npm-package', 'preset', 'config.js')).href);
+  const dir = mkdtempSync(join(tmpdir(), 'omds-route-'));
+  const file = join(dir, 'user.json');
+  writeFileSync(file, JSON.stringify({
+    preset: 'my-dsh-normal',
+    roles: {
+      oracle: { provider: 'local', model: 'route-model', effort: 'max', maxTokens: 4096 },
+      // A cap without a route is the same class as a half route: the role
+      // inherits the session's model, so the session's cap must win.
+      fixer: { maxTokens: 2048 },
+    },
+  }));
+  const previous = {
+    OH_MY_DSH_SLIM_CONFIG: process.env.OH_MY_DSH_SLIM_CONFIG,
+    OH_MY_DSH_SLIM_PROFILE_DIR: process.env.OH_MY_DSH_SLIM_PROFILE_DIR,
+  };
+  process.env.OH_MY_DSH_SLIM_CONFIG = file;
+  process.env.OH_MY_DSH_SLIM_PROFILE_DIR = dir;
+  try {
+    config.resetConfigForTests();
+    const routed = roles.resolveRole({ definition: { roleId: 'oracle', persona: 'body' } });
+    assert.equal(routed.agentOptions.provider, 'local', 'a complete route reaches the host');
+    assert.equal(routed.agentOptions.model, 'route-model', 'a complete route reaches the host');
+    assert.equal(routed.agentOptions.reasoningEffort, 'max', 'a pinned route keeps its spawn-time effort');
+    assert.equal(routed.agentOptions.maxTokens, 4096, 'a pinned route keeps its own output cap');
+    const inheritedCap = roles.resolveRole({ definition: { roleId: 'fixer', persona: 'body' } });
+    assert.equal(inheritedCap.agentOptions.maxTokens, undefined, 'a cap without a route follows the session');
+    const rowHalf = roles.resolveRole({ agentOptions: { model: 'only-a-model' }, definition: { roleId: 'fixer', persona: 'body' } });
+    assert.equal(rowHalf.agentOptions.provider, undefined, 'a row-level half route is ignored');
+    assert.equal(rowHalf.agentOptions.model, undefined, 'a row-level half route is ignored');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    config.resetConfigForTests();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the role wrapper hands the host every service and key it needs', async () => {

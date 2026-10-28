@@ -11,6 +11,16 @@ const anchor = process.env.DSH_HOST_ANCHOR;
 if (!anchor || !path.isAbsolute(anchor)) throw new Error('Set DSH_HOST_ANCHOR to an absolute installed DSH host JS entry');
 const requireHost = createRequire(anchor);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'omds-native-host-'));
+// The preset resolves bare `@deepseek-ai/*` imports through the host loader
+// against this profile's base URL. A bare temp profile has no node_modules, so
+// link the installed host's scope in; the desktop runtime does this through
+// `bareModuleBaseUrl`, which an npm-installed host exposes only at boot.
+fs.mkdirSync(path.join(temporary, 'node_modules'), { recursive: true });
+fs.symlinkSync(
+  path.join(path.dirname(requireHost.resolve('@deepseek-ai/dsh/package.json')), '..'),
+  path.join(temporary, 'node_modules', '@deepseek-ai'),
+  'dir',
+);
 process.env.DSH_HOME = temporary;
 delete process.env.DSH_PROFILE;
 delete process.env.OH_MY_DSH_SLIM_CONFIG;
@@ -64,22 +74,26 @@ const hostImport = name => import(pathToFileURL(requireHost.resolve(name)).href)
   const profileModule = await import(pathToFileURL(path.join(packageDir, 'lib/profile-registry.js')).href);
   const configModule = await import(pathToFileURL(path.join(packageDir, 'preset/config.js')).href);
   const endpoints = profileModule.makeProfileEndpoints({ agentPresets: registry, getEditor: () => ctx.get('configEditor'), getSettings: () => ctx.get('settings') });
-  const first = await endpoints.create({ displayName: 'Named A', config: { roles: { oracle: { model: 'profile-a', effort: 'none' } } } });
+  const first = await endpoints.create({ displayName: 'Named A', config: { roles: { oracle: { provider: 'smoke-p', model: 'profile-a', effort: 'none' } } } });
   const second = await endpoints.create({ displayName: 'Named B', config: {} });
   for (const id of [first.id, second.id]) { const named = await registry.resolve(id); if (named.broken) throw new Error(named.broken); }
-  assert.equal(form.base.presets[form.base.preset].designer.model, 'deepseek-v4-flash');
+  // Issue #11 (default coupling): the shipped base pins no route and no fixed
+  // effort; each role follows the session model and its effort.
+  assert.equal(form.base.presets[form.base.preset].designer.provider, undefined);
+  assert.equal(form.base.presets[form.base.preset].designer.model, undefined);
+  assert.equal(form.base.presets[form.base.preset].designer.effort, undefined);
   const aCtx = ctx.extend(), bCtx = ctx.extend();
   configModule.bindProfileContext(aCtx, first.id); configModule.bindProfileContext(bCtx, second.id);
   assert.equal(configModule.loadConfig(aCtx).roles.oracle.model, 'profile-a');
   assert.notEqual(configModule.loadConfig(bCtx).roles.oracle.model, 'profile-a');
-  const saved = await endpoints.save({ id: first.id, config: { roles: { oracle: { model: 'profile-new' } } }, expectedRevision: first.revision });
+  const saved = await endpoints.save({ id: first.id, config: { roles: { oracle: { provider: 'smoke-p', model: 'profile-new' } } }, expectedRevision: first.revision });
   assert.equal(configModule.loadConfig(aCtx).roles.oracle.model, 'profile-new');
   assert.notEqual(configModule.loadConfig(bCtx).roles.oracle.model, 'profile-new');
   await assert.rejects(endpoints.save({ id: first.id, config: {}, expectedRevision: first.revision }), error => error.code === 'PROFILE_CONFLICT');
   await endpoints.setDefault({ profileId: first.id });
   assert.equal(registry.defaultId, first.id);
   const overrideFile = path.join(temporary, 'override.json');
-  fs.writeFileSync(overrideFile, JSON.stringify({ roles: { oracle: { model: 'env-first' } } }));
+  fs.writeFileSync(overrideFile, JSON.stringify({ roles: { oracle: { provider: 'smoke-p', model: 'env-first' } } }));
   process.env.OH_MY_DSH_SLIM_CONFIG = overrideFile;
   assert.equal(configModule.loadConfig(aCtx).roles.oracle.model, 'env-first');
   delete process.env.OH_MY_DSH_SLIM_CONFIG;

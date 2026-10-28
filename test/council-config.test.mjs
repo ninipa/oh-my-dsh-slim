@@ -167,7 +167,7 @@ test('derived council state survives every config channel shape', t => {
   resetConfigForTests();
   assert.equal(councilActive(loadConfig().roles), true, 'advanced shape');
   // An existing install that never knew about council still gets the derived off state.
-  f.save({ roles: { oracle: { model: 'custom' } } });
+  f.save({ roles: { oracle: { provider: 'p', model: 'custom' } } });
   resetConfigForTests();
   const config = loadConfig();
   assert.equal(config.roles.oracle.model, 'custom');

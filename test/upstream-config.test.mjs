@@ -12,6 +12,23 @@ import { escalationArgsAreDoomed, stripEscalationArgs, isDelegatedChild } from '
 
 const defaultDocument = JSON.parse(upstream('defaults.json'));
 
+// Issue #11 (default coupling): the six delegation roles ship without a model
+// route AND without a fixed effort — both follow the session. The 0.5.3
+// baseline still pins provider/model/effort per role, so the parity harness
+// feeds both loaders the same stripped base; the byte comparison below pins
+// that the rest of every upstream key is unchanged. `orchestrator` is not a
+// delegation role and keeps its shipped effort.
+const stripShippedDefaults = (roleId, role) => {
+  if (!UPSTREAM_ROLE_IDS.includes(roleId) || role === null || typeof role !== 'object' || Array.isArray(role)) return role;
+  const { provider, model, effort, ...rest } = role;
+  return rest;
+};
+const stripRoutes = (preset) => Object.fromEntries(Object.entries(preset).map(([roleId, role]) => [roleId, stripShippedDefaults(roleId, role)]));
+const baselineDocument = {
+  ...defaultDocument,
+  presets: Object.fromEntries(Object.entries(defaultDocument.presets ?? {}).map(([name, preset]) => [name, stripRoutes(preset)])),
+};
+
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'omds-upstream-'));
   const env = { ...process.env };
@@ -19,7 +36,7 @@ function fixture(t) {
   process.env.OH_MY_DSH_SLIM_CONFIG = file;
   process.env.OH_MY_DSH_SLIM_PROFILE_DIR = dir;
   process.env.DSH_HOME = dir;
-  writeFileSync(join(dir, 'defaults.json'), JSON.stringify(defaultDocument));
+  writeFileSync(join(dir, 'defaults.json'), JSON.stringify(baselineDocument));
   t.after(() => { for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key]; Object.assign(process.env, env); rmSync(dir, { recursive: true, force: true }); });
   const source = upstream('config-loader.js').replace(/^import .*;\r?\n/gm, '').replace(/const ROOT = .*;/, 'const ROOT = baselineDir;').replace(/export /g, '');
   const original = new Function('existsSync', 'readFileSync', 'basename', 'dirname', 'join', 'fileURLToPath', 'baselineDir', source + '\nreturn { loadConfig, validateConfigDocument, EFFORT_LEVELS };')(existsSync, readFileSync, basename, dirname, join, fileURLToPath, dir);
@@ -33,9 +50,9 @@ const upstreamFace = (config) => ({ ...config, roles: Object.fromEntries(UPSTREA
 
 for (const [label, doc] of [
   ['factory defaults', {}],
-  ['compact overrides and deny union', { roles: { oracle: { model: 'custom', deny: ['bash'], tools: [] } }, advanced: { roles: { oracle: { deny: ['read'], temperature: 0.8, personaAppend: 'append' } } } }],
-  ['compact replaces legacy role entry', { presets: { 'my-dsh-normal': { oracle: { model: 'legacy', effort: 'low' } } }, roles: { oracle: { temperature: 0.4 } } }],
-  ['custom preset inherits factory roles', { preset: 'custom', presets: { custom: { fixer: { model: 'custom-fixer' } } } }],
+  ['compact overrides and deny union', { roles: { oracle: { provider: 'prov', model: 'custom', deny: ['bash'], tools: [] } }, advanced: { roles: { oracle: { deny: ['read'], temperature: 0.8, personaAppend: 'append' } } } }],
+  ['compact replaces legacy role entry', { presets: { 'my-dsh-normal': { oracle: { provider: 'prov', model: 'legacy', effort: 'low' } } }, roles: { oracle: { temperature: 0.4 } } }],
+  ['custom preset inherits factory roles', { preset: 'custom', presets: { custom: { fixer: { provider: 'prov', model: 'custom-fixer' } } } }],
   ['top-level orchestrator', { orchestrator: { effort: 'low', mcps: ['context7'] } }],
   ['observer force disabled', { roles: { observer: { enabled: true } } }],
 ]) test('upstream config parity: ' + label, t => {
@@ -44,14 +61,27 @@ for (const [label, doc] of [
   assert.deepEqual(EFFORT_LEVELS, f.original.EFFORT_LEVELS);
 });
 
-test('bundled defaults keep the upstream preset byte-for-byte and add the council family', () => {
+test('bundled defaults keep every upstream key except the role route and effort, and add the council family', () => {
   const bundled = JSON.parse(readFileSync(new URL('../npm-package/preset/defaults.json', import.meta.url), 'utf8'));
   const bundledPreset = bundled.presets['my-dsh-normal'];
   const upstreamPreset = defaultDocument.presets['my-dsh-normal'];
+  // Issue #11 (default coupling): the shipped role route (provider/model) and
+  // the fixed effort are intentionally gone — every delegation role follows
+  // the session. Every OTHER upstream key stays identical, which is what this
+  // comparison pins.
   assert.deepEqual({
     ...bundled,
-    presets: { ...bundled.presets, 'my-dsh-normal': Object.fromEntries(Object.keys(upstreamPreset).map(key => [key, bundledPreset[key]])) },
-  }, defaultDocument, 'every upstream key stays identical');
+    presets: { ...bundled.presets, 'my-dsh-normal': Object.fromEntries(Object.keys(upstreamPreset).map(key => [key, stripShippedDefaults(key, bundledPreset[key])])) },
+  }, {
+    ...defaultDocument,
+    presets: { ...defaultDocument.presets, 'my-dsh-normal': stripRoutes(upstreamPreset) },
+  }, 'every upstream key except the role route and effort stays identical');
+  for (const roleId of UPSTREAM_ROLE_IDS) {
+    assert.equal(bundledPreset[roleId].provider, undefined, roleId + ': inherits the session model (no provider)');
+    assert.equal(bundledPreset[roleId].model, undefined, roleId + ': inherits the session model (no model)');
+    assert.equal(bundledPreset[roleId].effort, undefined, roleId + ': inherits the session effort (no effort)');
+  }
+  assert.equal(bundledPreset.orchestrator.effort, 'max', 'the orchestrator is not a delegation role and keeps its effort');
   for (const roleId of ['councillor-alpha', 'councillor-beta', 'councillor-gamma']) {
     assert.equal(bundledPreset[roleId].enabled, false, roleId + ': disabled by default');
     assert.deepEqual(bundledPreset[roleId].tools, ['read', 'glob', 'grep'], roleId + ': read-only allow list');
@@ -71,10 +101,10 @@ test('unknown named presets fail load and validation just like upstream', t => {
 
 test('channel priority remains explicit file > snapshot > live settings > legacy', t => {
   const f = fixture(t);
-  f.save({ roles: { fixer: { model: 'explicit' } } });
-  writeFileSync(join(f.dir, 'profile.json'), JSON.stringify({ roles: { fixer: { model: 'snapshot' } } }));
-  writeFileSync(join(f.dir, 'oh-my-dsh-slim.json'), JSON.stringify({ roles: { fixer: { model: 'legacy' } } }));
-  const row = { ns: 'oh-my-dsh-slim', value: { roles: { fixer: { model: 'native' } } } };
+  f.save({ roles: { fixer: { provider: 'chan', model: 'explicit' } } });
+  writeFileSync(join(f.dir, 'profile.json'), JSON.stringify({ roles: { fixer: { provider: 'chan', model: 'snapshot' } } }));
+  writeFileSync(join(f.dir, 'oh-my-dsh-slim.json'), JSON.stringify({ roles: { fixer: { provider: 'chan', model: 'legacy' } } }));
+  const row = { ns: 'oh-my-dsh-slim', value: { roles: { fixer: { provider: 'chan', model: 'native' } } } };
   const ctx = { settings: { describe: () => [row] } };
   assert.equal(loadConfig(ctx).roles.fixer.model, 'explicit');
   delete process.env.OH_MY_DSH_SLIM_CONFIG;

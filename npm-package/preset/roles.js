@@ -378,19 +378,40 @@ export function resolveRole(config, ctx) {
   const roleConfig = preset.roles[row.roleId] ?? {};
   const shipped = roleConfig;
   const agentOptions = {};
+  // A route is provider AND model, or neither. A half route cannot describe a
+  // reachable target, and filling the missing half from the host would silently
+  // pair one provider id with another provider's model id. Roles ship no route
+  // (issue #11): an unset route means the child inherits the session's model.
   const model = roleConfig.model ?? config.agentOptions?.model;
-  if (text(model)) agentOptions.model = model;
   const provider = roleConfig.provider ?? config.agentOptions?.provider;
-  if (text(provider)) agentOptions.provider = provider;
-  // The host's agentOptions.reasoningEffort is where a child route takes its
-  // effort: the shipped per-role effort in defaults.json is dead weight unless
-  // it is forwarded here, and `effort` is deliberately passed through as an
-  // adapter-owned token rather than checked against a baked-in vocabulary.
+  const routed = text(model) && text(provider);
+  if (routed) {
+    agentOptions.provider = provider;
+    agentOptions.model = model;
+  } else if (text(model) !== text(provider)) {
+    ctx?.logger?.warn?.(
+      'oh-my-dsh-slim: role "' + row.roleId + '" configures only ' + (text(model) ? 'model' : 'provider') +
+      '; a route needs both, so this role inherits the session model instead',
+    );
+  }
+  // The host preflights `agentOptions` (route + effort) BEFORE it creates the
+  // child, and rejects a level the effective model does not declare. On an
+  // inherited route the effective model is the session's main model — which can
+  // change between sessions — so forwarding the role's effort here would make a
+  // new main model without that level REJECT the delegation before the
+  // request-time fallback in subagent-roles can run. A pinned route keeps the
+  // spawn-time effort (the card gates it against that exact model); an
+  // inherited route leaves the child on the session's own effort, and
+  // subagent-roles applies the role's level per request when the model supports
+  // it. `effort` stays an adapter-owned token, never a baked-in vocabulary.
   const effort = roleConfig.effort ?? shipped.effort ?? config.agentOptions?.reasoningEffort;
-  if (text(effort) && effort !== 'none') agentOptions.reasoningEffort = effort;
-  else if (text(config.agentOptions?.reasoningEffort)) agentOptions.reasoningEffort = config.agentOptions.reasoningEffort;
+  if (routed && text(effort) && effort !== 'none') agentOptions.reasoningEffort = effort;
+  // maxTokens is a route capability as well (the host's AgentOptions are
+  // provider/model/effort/maxTokens). On an inherited route the session's own
+  // cap applies: a role-specific budget could exceed the new main model's
+  // output limit and fail the call, so only a pinned route carries it.
   const maxTokens = roleConfig.maxTokens ?? config.agentOptions?.maxTokens;
-  if (typeof maxTokens === 'number') agentOptions.maxTokens = maxTokens;
+  if (routed && typeof maxTokens === 'number') agentOptions.maxTokens = maxTokens;
   const persona = composeRolePersona(row.roleId, definition.persona, roleConfig.personaAppend, config.persona);
   const toolFilter = effectiveRoleFilter(row.roleId, roleConfig, definition);
   const toolName = text(definition.toolName) ? definition.toolName : row.toolName;

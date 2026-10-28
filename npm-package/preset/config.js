@@ -70,6 +70,26 @@ const TOOL_NAMES = new Set([
 // observer (delegation prompts are text-only).
 const FORCE_DISABLED_ROLES = new Set(['observer']);
 
+/** Half-route notices already reported. loadConfig() runs for every delegated
+ * request, so a malformed route must be reported once, not once per turn. */
+const halfRouteWarnings = new Set();
+
+/**
+ * Report a role that configures only one half of a model route. The half is
+ * dropped (the role inherits the session model), which leaves this notice and
+ * the settings card as the only visible traces.
+ * @param roleId - the role whose route is incomplete.
+ * @param hasProvider - true when the surviving half is the provider id.
+ */
+function warnHalfRoute(roleId, hasProvider) {
+  if (halfRouteWarnings.has(roleId)) return;
+  halfRouteWarnings.add(roleId);
+  process.stderr.write(
+    'oh-my-dsh-slim: role "' + roleId + '" configures only ' + (hasProvider ? 'provider' : 'model') +
+    '; a model route needs both halves — inheriting the session model instead' + String.fromCharCode(10),
+  );
+}
+
 let cachedDefaults;
 const profileContexts = new WeakMap();
 export function bindProfileContext(ctx, profileId) {
@@ -161,6 +181,18 @@ function mergeRole(roleId, base, override, advanced) {
   // allow list is exhaustive once present — DSH's tools.restrict() rejects
   // everything outside it, so an accidental [] must not become "allow nothing".
   if (Array.isArray(merged.tools) && merged.tools.length === 0) delete merged.tools;
+  // A model route is provider AND model, or neither (issue #11). Half a route
+  // cannot describe a reachable target: the runtime would either pair one
+  // provider's id with another provider's model or ignore the value silently.
+  // Drop it here so role rows, the request router and the settings card all
+  // read the same effective document — the role then follows the session model.
+  const routeProvider = typeof merged.provider === 'string' && merged.provider !== '';
+  const routeModel = typeof merged.model === 'string' && merged.model !== '';
+  if (routeProvider !== routeModel) warnHalfRoute(roleId, routeProvider);
+  if (!routeProvider || !routeModel) {
+    delete merged.provider;
+    delete merged.model;
+  }
   if (merged.enabled === undefined) merged.enabled = true;
   if (FORCE_DISABLED_ROLES.has(roleId)) {
     if (merged.enabled === true) {

@@ -64,7 +64,7 @@ check(card.missingPrimitives(makePrimitives({ drop: ['Button', 'Toast'] })).join
 check(typeof card.planUserOps === 'function' && typeof card.buildDraft === 'function',
   'pure helpers exported for tests');
 check(source.includes("const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'max'];"), 'effort options include explicit none mode');
-check(source.includes('effortNoneHint'), 'none mode carries a compatibility explanation');
+check(source.includes('effortFollowHint') && source.includes('effortModelDefaultHint'), 'the follow choice carries a route-aware explanation');
 
 // Issue #9: a stored effort the selected model cannot take used to render as
 // the FIRST option (the browser falls back to option 0 when `value` matches no
@@ -89,10 +89,10 @@ check(card.effortOptionsFor(noReasoning, 'plain', 'text-only').map((option) => o
   'a model without reasoning declares only "none"');
 check(card.effortMismatch('high', noReasoning, 'plain', 'text-only') === true,
   'a reasoning-less model reports a stored level as unsupported');
-check(source.includes("value: effortBad ? '' : (role.effort ?? '')"),
-  'a mismatched effort renders the placeholder instead of a false selection');
-check(source.includes("disabled: effortBad }, t('effortPlaceholder')"),
-  'the placeholder cannot be re-picked (a no-op change would hide the error)');
+check(source.includes('value: effortSelectValue(role, effortBad)'),
+  'the select value comes from the shared helper (mismatch → placeholder, unset → follow-session)');
+check(source.includes("effortBad ? React.createElement('option', { value: '', disabled: true }, t('effortPlaceholder')) : null"),
+  'the placeholder is a disabled mismatch marker, never a selectable option');
 check(source.includes("t('effortMismatch').replace('{effort}', String(role.effort))"),
   'the error line names the level the configuration still holds');
 // The save gate is a pure decision so it can be asserted directly: a disabled
@@ -176,8 +176,10 @@ console.log('\n[apply: old-host degradation]');
 
 // ------------------------------------------------------------- planUserOps
 console.log('\n[planUserOps]');
-// Fixture mirrors the real base shape: every role carries enabled/provider/
-// model/effort (as the shipped defaults.json does).
+// Fixture mirrors a plausible base shape: every role carries enabled/provider/
+// model/effort. The SHIPPED defaults no longer pin a route (issue #11, roles
+// inherit the session model); this base exists to exercise the planner's
+// set/unset mechanics against a base that does carry one.
 const roleDefaults = (provider, model, effort) => ({ enabled: true, provider, model, effort });
 const seatDefaults = () => ({ enabled: false, tools: ['read', 'glob', 'grep'], mcps: [] });
 const BASE = {
@@ -656,6 +658,47 @@ console.log('\n[model-scoped effort options (flash+medium regression)]');
   check(fixedFallback === 'none,off,low,medium,high,max', 'unknown model/provider → fixed-list fallback (behavior unchanged)');
   check(card.effortOptionsFor([], undefined, undefined).length === 6, 'catalog loading/error (empty groups) → fixed-list fallback');
 
+  // The `none` token is the plugin's "do not specify" choice, not a model
+  // level (`off` is the level that disables thinking). The dropdown says what
+  // it does instead of echoing the raw token.
+  const labelFor = (key) => key;
+  check(card.effortLabel({ value: 'none', label: 'none' }, labelFor) === 'effortInherit',
+    'the none token renders as "follow session", not as a model level');
+  check(card.effortLabel({ value: 'off', label: 'Off' }, labelFor) === 'effortOff',
+    'the off level renders as "thinking off"');
+  check(card.effortLabel({ value: 'high', label: 'High' }, labelFor) === 'High',
+    'other adapter levels keep the catalog label');
+
+  // The placeholder is a disabled mismatch marker, never a choice. An unset
+  // effort is the same runtime state as none, so the control selects the
+  // follow-session option instead of showing "Select…".
+  check(card.effortSelectValue({ effort: undefined }, false) === 'none',
+    'an unset effort selects the follow-session option');
+  check(card.effortSelectValue({ effort: 'high' }, false) === 'high', 'a declared level selects itself');
+  check(card.effortSelectValue({ effort: 'max' }, true) === '', 'a mismatched level selects the disabled placeholder');
+
+  // The line under the control must not claim "follows the session" when the
+  // route is pinned: the host drops the inherited level on a route change, so
+  // nothing is sent and the model's own default applies.
+  check(card.effortHintKey({ effort: 'none', provider: undefined, model: undefined }) === 'effortFollowHint',
+    'follow under an inherited route explains the session level');
+  check(card.effortHintKey({ effort: 'none', provider: 'p', model: 'm' }) === 'effortModelDefaultHint',
+    'follow under a pinned route explains the model default');
+  check(card.effortHintKey({ effort: 'high', provider: 'p', model: 'm' }) === undefined,
+    'a concrete level carries no follow hint');
+
+  // Default coupling: choosing "inherit" clears the role's own effort in the
+  // same edit, so a stale fixed level cannot meet the next main model.
+  const inheritPatch = card.roleModelPatch(undefined, undefined);
+  check(inheritPatch.provider === undefined && inheritPatch.model === undefined
+    && inheritPatch.effort === 'none' && inheritPatch.maxTokens === undefined,
+    'switching a role to inherit also clears its effort and output cap');
+  const pinnedPatch = card.roleModelPatch('p', 'm');
+  check(pinnedPatch.provider === 'p' && pinnedPatch.model === 'm' && !('effort' in pinnedPatch),
+    'picking a concrete model leaves the effort alone');
+  check(source.includes('disabled: locked || !routed') && source.includes("t('maxTokensFollowHint')"),
+    'the output cap is inert and explained while the model is inherited');
+
   const mismatch = (effort, provider, model) => card.effortMismatch(effort, CATALOG.groups, provider, model);
   check(mismatch('medium', 'deepseek-official', 'deepseek-v4-flash') === true, 'flash + medium flagged as mismatch');
   check(mismatch('high', 'deepseek-official', 'deepseek-v4-flash') === false, 'flash + high is fine');
@@ -689,6 +732,69 @@ console.log('\n[model-scoped effort options (flash+medium regression)]');
     `every catalog-offered level is writable by the profile RPC${unwritable.length === 0 ? '' : ` — unwritable: ${unwritable.join('; ')}`}`);
 }
 
+console.log('\n[model inherit (issue #11)]');
+{
+  const catalog = [{ id: 'prov', name: 'Provider', models: [{ id: 'm1', name: 'One' }, { id: 'm2', name: 'Two' }] }];
+  const selectOf = (props) => card.ModelSelect({ groups: catalog, status: 'ready', t: (key) => key, ...props });
+  const optionsOf = (el) => (Array.isArray(el.children) ? el.children.flat() : [el.children]).filter(Boolean);
+  const inheritOption = (el) => optionsOf(el).find((node) => node.type === 'option' && node.props.value === '');
+
+  const empty = selectOf({ provider: undefined, model: undefined, onChange: () => {} });
+  check(empty.props.value === '', 'an unconfigured role selects the inherit option');
+  check(inheritOption(empty)?.children?.includes('modelInherit') === true,
+    'the inherit option is always present and labelled (no more "no models found" as the value)');
+
+  const pinned = selectOf({ provider: 'prov', model: 'm1', onChange: () => {} });
+  check(pinned.props.value === 'prov/m1', 'a pinned route still selects its catalog entry');
+
+  const calls = [];
+  const clearing = selectOf({ provider: 'prov', model: 'm1', onChange: (...args) => calls.push(args) });
+  clearing.props.onChange({ target: { value: '' } });
+  check(calls.length === 1 && calls[0][0] === undefined && calls[0][1] === undefined,
+    'picking inherit clears BOTH halves (the only way back from a pinned model)');
+
+  const chosen = [];
+  selectOf({ provider: undefined, model: undefined, onChange: (...args) => chosen.push(args) })
+    .props.onChange({ target: { value: 'prov/m2' } });
+  check(chosen[0]?.[0] === 'prov' && chosen[0]?.[1] === 'm2', 'picking a catalog entry pins both halves');
+
+  const broken = selectOf({ provider: undefined, model: undefined, status: 'error', onChange: () => {} });
+  const notice = optionsOf(broken).find((node) => node.type === 'option' && node.props.value === '__catalog__');
+  check(broken.props.value === '' && notice?.props.disabled === true && notice.children.includes('modelsError'),
+    'a missing catalog is a disabled notice, not the selected value');
+
+  const unknown = selectOf({ provider: 'ghost', model: 'g9', onChange: () => {} });
+  check(unknown.props.value === 'ghost/g9', 'an off-catalog configured route still renders its current value');
+
+  // Half a route is unreachable: the editor drafts it as inherit, and saving
+  // clears both halves instead of persisting a value the runtime would drop.
+  // The fixture keeps every role so the planner does not also plan unrelated
+  // `enabled` writes for roles the base lacks.
+  const noRouteBase = JSON.parse(JSON.stringify(BASE));
+  for (const role of Object.values(noRouteBase.presets.p)) {
+    delete role.provider;
+    delete role.model;
+  }
+  const halfBase = JSON.parse(JSON.stringify(noRouteBase));
+  halfBase.presets.p.oracle.provider = 'prov';
+  const inheritDraft = card.buildDraft(noRouteBase, undefined, noRouteBase);
+  const halfDraft = card.buildDraft(halfBase, undefined, halfBase);
+  check(inheritDraft.roles.oracle.provider === undefined && inheritDraft.roles.oracle.model === undefined,
+    'an unconfigured role drafts as inherit');
+  check(halfDraft.roles.oracle.provider === undefined && halfDraft.roles.oracle.model === undefined,
+    'half a route drafts as inherit');
+  const routedUser = { presets: { p: { oracle: { provider: 'prov', model: 'm1' } } } };
+  const clearOps = card.planUserOps(noRouteBase, routedUser, inheritDraft);
+  check(clearOps.map((op) => `${op.op}:${op.path.join('.')}`).sort().join(',') === 'unset:presets.p.oracle.model,unset:presets.p.oracle.provider',
+    'saving inherit unsets both halves in the user layer');
+
+  const pinnedDraft = card.buildDraft(noRouteBase, undefined, noRouteBase);
+  pinnedDraft.roles.oracle = { ...pinnedDraft.roles.oracle, provider: 'prov', model: 'm2' };
+  const setOps = card.planUserOps(noRouteBase, {}, pinnedDraft);
+  check(setOps.map((op) => `${op.op}:${op.path.join('.')}=${op.value}`).sort().join(',') === 'set:presets.p.oracle.model=m2,set:presets.p.oracle.provider=prov',
+    'picking a model writes both halves');
+}
+
 console.log('\n[rc.2 contract + baseline preservation]');
 {
   const events = runApply(card);
@@ -717,6 +823,16 @@ console.log('\n[rc.2 contract + baseline preservation]');
   };
   const currentBuildDraft = extractHelper(source, 'buildDraft');
   const legacyBuildDraft = extractHelper(legacy, 'buildDraft');
+  // ModelSelect has no docblock of its own; bound it at the definition line so
+  // the substitution cannot swallow the helpers above it.
+  const functionBlock = (text, name) => {
+    const at = text.indexOf(`    function ${name}(`);
+    if (at < 0) return undefined;
+    const end = text.indexOf('\n    }\n', at);
+    return end < 0 ? undefined : text.slice(at, end + '\n    }\n'.length);
+  };
+  const currentModelSelect = functionBlock(source, 'ModelSelect');
+  const legacyModelSelect = functionBlock(legacy, 'ModelSelect');
   const derivedSkip = "          // council.enabled is derived from the seats; never write it.\n          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n";
   const derivedTextOps = "        for (const field of ADVANCED_TEXT_FIELDS) {\n          const path = ['advanced', 'roles', roleId, field];\n          const dv = d[field];\n          const uv = getPath(user, path);\n          if (dv === undefined || dv === '') {\n            if (uv !== undefined) ops.push({ op: 'unset', path });\n          } else if (!deepEqualJson(uv, dv)) {\n            ops.push({ op: 'set', path, value: dv });\n          }\n        }\n";
   const derivedTextAdvanced = "        for (const field of ADVANCED_TEXT_FIELDS) {\n          const value = role[field];\n          if (value === undefined || value === '' || deepEqualJson(value, baseRole[field])) continue;\n          advanced[field] = value;\n        }\n";
@@ -795,6 +911,10 @@ console.log('\n[rc.2 contract + baseline preservation]');
       // council synthesizer's enabled bit from its seats. Normalize those
       // intentional changes back to the legacy text before comparing.
       .replaceAll(currentBuildDraft, legacyBuildDraft)
+      // 0.8.5 (issue #11) turns "inherit the session model" into a first-class
+      // option and stops rendering the catalog notice as the selected value;
+      // the behavioral checks above cover the new control.
+      .replaceAll(currentModelSelect, legacyModelSelect ?? currentModelSelect)
       .replaceAll(derivedSkip, '')
       .replaceAll("          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n", '')
       .replaceAll(derivedTextOps, '')

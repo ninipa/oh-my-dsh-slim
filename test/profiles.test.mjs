@@ -27,8 +27,8 @@ test('profile authoring preserves unrelated row fields and locked conflicts', as
   const { entry, endpoints } = fixture();
   const first = await endpoints.create({ displayName: 'Example', config: {} });
   const results = await Promise.allSettled([
-    endpoints.save({ id: first.id, expectedRevision: first.revision, config: { roles: { oracle: { model: 'a' } } } }),
-    endpoints.save({ id: first.id, expectedRevision: first.revision, config: { roles: { oracle: { model: 'b' } } } }),
+    endpoints.save({ id: first.id, expectedRevision: first.revision, config: { roles: { oracle: { provider: 'p', model: 'a' } } } }),
+    endpoints.save({ id: first.id, expectedRevision: first.revision, config: { roles: { oracle: { provider: 'p', model: 'b' } } } }),
   ]);
   assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
   assert.equal(results.find(row => row.status === 'rejected').reason.code, 'PROFILE_CONFLICT');
@@ -38,12 +38,12 @@ test('profile authoring preserves unrelated row fields and locked conflicts', as
 });
 test('two existing contexts remain profile-isolated and observe live saves', async () => {
   const { endpoints, context } = fixture();
-  const a = await endpoints.create({ displayName: 'A', config: { roles: { oracle: { model: 'one' } } } });
+  const a = await endpoints.create({ displayName: 'A', config: { roles: { oracle: { provider: 'p', model: 'one' } } } });
   const b = await endpoints.create({ displayName: 'B', config: {} });
   const aCtx = context(a.id), bCtx = context(b.id);
   assert.equal(loadConfig(aCtx).roles.oracle.model, 'one');
   assert.notEqual(loadConfig(bCtx).roles.oracle.model, 'one');
-  await endpoints.save({ id: a.id, expectedRevision: a.revision, config: { roles: { oracle: { model: 'new' } } } });
+  await endpoints.save({ id: a.id, expectedRevision: a.revision, config: { roles: { oracle: { provider: 'p', model: 'new' } } } });
   assert.equal(loadConfig(aCtx).roles.oracle.model, 'new');
   assert.notEqual(loadConfig(bCtx).roles.oracle.model, 'new');
 });
