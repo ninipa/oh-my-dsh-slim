@@ -216,7 +216,7 @@ test('a partial user override keeps the shipped role settings', async () => {
       ['edit', 'write', 'skill', 'job_kill', 'job_list', 'job_output', 'todo_write', 'ask_user_question'],
       'the shipped deny list survives a route-only override',
     );
-    assert.equal(roles.oracle.maxTokens, 128000, 'the runtime floor still applies');
+    assert.equal(roles.oracle.maxTokens, undefined, 'no role ships an output cap; the model owns it');
     assert.equal(roles.explorer.enabled, false, 'the user may disable one role');
     assert.equal(roles.designer.model, undefined, 'untouched roles inherit the session model');
     assert.equal(roles.designer.effort, undefined, 'untouched roles inherit the session effort');

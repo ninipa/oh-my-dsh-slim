@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.5 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.6 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -23,6 +23,14 @@ directory to copy.
 
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
+
+> **0.8.6 (2026-10-28): the output cap belongs to the model, not the role.** No role ships a
+> `maxTokens` default any more: a followed role uses the session's cap, a pinned route uses the
+> target model's own default, and only an explicit value in the card's advanced field is sent
+> (clamped to the model's declared default when larger). A pinned route no longer inherits the
+> session's cap. The old numbers (oracle 128k, fixer 96k, …) were invented here —
+> oh-my-opencode-slim has no such concept — and caused every "role budget exceeds the model
+> limit" failure. See [CHANGELOG.md](./CHANGELOG.md).
 
 > **0.8.5 (2026-10-28): roles inherit the session model by default.** The package no longer
 > pins provider/model or a fixed effort for the six roles: a subagent follows the session's main
@@ -65,10 +73,11 @@ retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
   warning. The dropdown shows `none` as "Follow session (unspecified)" and `off` as "Thinking off";
   switching a role back to inherit clears its fixed level in the same edit. A role with a pinned
   model keeps validating against that model.
-- **The output-token cap follows the route too**: with an inherited model the session/model decides
-  it, so the advanced "Max tokens" field is disabled (pin a model to set it) — a role budget could
-  exceed the new main model's output limit. Temperature, tools, prompts and MCP stay per role:
-  they describe the specialist, not the route.
+- **The output cap belongs to the model, not the role** (0.8.6): no role ships a `maxTokens`
+  default. A followed role uses the session's cap; a pinned route uses the target model's default
+  unless you fill the advanced "Max tokens" field (a larger value is clamped to the model's
+  declared default). A pinned route never inherits the session's cap. Temperature, tools, prompts
+  and MCP stay per role: they describe the specialist, not the route.
 - Roles inherit global tools. Read-only roles deny `edit`/`write`; all roles deny control tools
   (`skill`, `job_kill`, `job_list`, `job_output`, `todo_write`, `ask_user_question`).
   Further delegation is disabled (`maxDepth: 1`).
@@ -125,7 +134,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.5
+oh-my-dsh-slim@0.8.6
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -135,7 +144,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.5
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.6
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules

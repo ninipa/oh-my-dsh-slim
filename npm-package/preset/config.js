@@ -44,17 +44,23 @@ export function isEffortToken(value) {
   return typeof value === 'string' && EFFORT_TOKEN_PATTERN.test(value);
 }
 
+// Per-role runtime knobs that are not part of the shipped preset document.
+// `temperature` is a role trait (the personas assume it). `maxTokens` is
+// deliberately absent: an output cap is a property of the model, not of the
+// role, and a role-specific default silently broke whenever the session or a
+// pinned model had a smaller limit. Roles inherit the session's cap, and a
+// pinned route uses the target model's own default unless the user sets one.
 const RUNTIME_DEFAULTS = {
-  oracle: { temperature: 0.1, maxTokens: 128000 },
-  designer: { temperature: 0.7, maxTokens: 64000 },
-  fixer: { temperature: 0.2, maxTokens: 96000 },
-  explorer: { temperature: 0.1, maxTokens: 32000 },
-  librarian: { temperature: 0.1, maxTokens: 48000 },
-  observer: { temperature: 0.1, maxTokens: 24000 },
-  'councillor-alpha': { temperature: 0.1, maxTokens: 48000 },
-  'councillor-beta': { temperature: 0.1, maxTokens: 48000 },
-  'councillor-gamma': { temperature: 0.1, maxTokens: 48000 },
-  council: { temperature: 0.1, maxTokens: 32000 },
+  oracle: { temperature: 0.1 },
+  designer: { temperature: 0.7 },
+  fixer: { temperature: 0.2 },
+  explorer: { temperature: 0.1 },
+  librarian: { temperature: 0.1 },
+  observer: { temperature: 0.1 },
+  'councillor-alpha': { temperature: 0.1 },
+  'councillor-beta': { temperature: 0.1 },
+  'councillor-gamma': { temperature: 0.1 },
+  council: { temperature: 0.1 },
 };
 
 const TOOL_NAMES = new Set([

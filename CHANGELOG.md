@@ -4,6 +4,71 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.6] — The output cap belongs to the model, not the role
+
+Follow-up to 0.8.5: removes the last role-level guess about a model capability — how many output
+tokens it can produce.
+
+- **No shipped `maxTokens`.** `RUNTIME_DEFAULTS` keeps only `temperature`; the six delegation
+  roles and the council family no longer carry a default output cap. A followed role uses the
+  session's cap, a pinned route uses the target model's own default. The old values (oracle
+  128000, fixer 96000, …) had no upstream counterpart — oh-my-opencode-slim has no `maxTokens`
+  concept at all — and every "role budget exceeds the model limit" failure traced back to them.
+- **A pinned route never inherits the session's cap.** The host copies the parent's `maxTokens`
+  into the child unconditionally; when the pinned route names another model, the request now
+  drops that cap instead of sending a value that belongs to a different model. A cap the user
+  names explicitly still wins, clamped to the target model's declared default.
+- **Card.** The advanced "Max tokens" field starts empty and says what empty means in both
+  states (follow, or a pinned model using its own default). The advanced disclosure is now a
+  labelled button rather than an icon-only one, and the glyphs resolve on 0.2.1 hosts: those
+  export `Icon…Outline(Medium|Regular)` with no `16`/`14` suffix, and the primitive proxy used
+  to answer every unknown name with a stand-in component, so the name fallback chain stopped at
+  its first candidate. The result was a card with no visible advanced section at all — the
+  only way to set an output cap — plus invisible warning glyphs. Both are fixed, and the card
+  suite now pins all three host generations.
+- **Card layout.** The shared `Field` defaults to the horizontal control row; reused inside a
+  column container its `1 1 160px` became a 160px-tall floor, leaving a band of empty space under
+  the seat-prompt box (and in the new-profile dialog). Fields in a column now opt out. The prompt
+  textarea also stops inheriting the single-line `height: 30` and the content-box width that made
+  it hug the top and spill past the card padding, and the synthesizer's prompt is labelled as a
+  synthesis prompt rather than a seat prompt.
+- **Council warnings now weigh the seat prompts.** "Repeat sample" was derived from the model
+  alone, so once roles began inheriting the session model the card warned on every default
+  configuration — even with three genuinely different seat prompts. Identical models AND
+  identical prompts now produce the plain warning; distinct prompts downgrade it to
+  "the angles differ, but samples from one model stay correlated". The seat-prompt hint also
+  states what an empty field means (the main model assigns a focus per task).
+- **Saving the card no longer dead-ends on a stale revision fence.** The write used the
+  revision captured in React state; an accepted mutation bumps it, and the settings row restart
+  that follows can bump it again before the next render. The next save was then rejected as
+  "changed in another window" — and every retry after that, even after the user removed the
+  value that looked like the trigger. The fence is now read live from the scope, retried once on
+  rejection, and a failed attempt resyncs the snapshot, so a manual retry starts from what the
+  host actually holds. The message no longer tells the user to reload by hand.
+- **A typed output cap is written as a number.** The advanced inputs report strings, and the
+  config document requires a positive integer (`Number.isSafeInteger`), so `maxTokens` used to
+  be written verbatim as `"384000"` — the host rejected the WHOLE document and the card looked
+  unable to save anything, including after the field was cleared (which wrote `''`). The planner
+  now coerces both numeric advanced fields and treats an emptied box as `unset`.
+- **Upgrade.** Profiles that set `maxTokens` explicitly keep it. Roles that relied on the
+  removed defaults use the session's cap when following and the model default when pinned; no
+  migration step.
+- **Verification.** 184 tests (184 pass / 0 skipped against an installed host) and `T0`. The
+  model-switch suite pins the new rules: a pinned route on another model drops the session cap, a
+  pinned route on the session model keeps it, and an explicit role cap is applied and clamped to
+  the target model's declared default — including on the first request of a session, where no
+  reroute runs. Every smoke passes on three host lines — 0.2.0-rc.2,
+  0.2.1-rc.2 and 0.2.1-rc.3 — namely `host-smoke`, `role-composition`, `council`,
+  `council-resume`, `real-role-row`, `model-switch` and `web-host` (21/21 on a re-run before
+  release). The card suite covers the four defects this patch shook out (host icon generations,
+  the column `Field`, the stale write fence, string-typed numeric fields).
+- **Desktop verification (0.2.1-rc.3, `omds-test` + bundled profile).** Following adopted the
+  session route/level/cap in a live conversation (`glm-5.3-flash` 131072 → `deepseek-v4.1-flash`
+  384000, no new session). A pinned route to another model stopped inheriting the session cap
+  (`mimo-v2.6-pro` ran at its own 131072 instead of 384000). Explicit caps behaved: 200000 kept,
+  384000 on `mimo-v2.6-pro` clamped to 131072, 500000 on `deepseek-v4.1-flash` clamped to 384000.
+  Saving the card, including the advanced fields, no longer dead-ends.
+
 ## [0.8.5] — Roles inherit the session model by default
 
 Patch release implementing [ninipa/oh-my-dsh-slim#11](https://github.com/ninipa/oh-my-dsh-slim/issues/11):

@@ -141,7 +141,9 @@ const log = (...args) => console.log('[model-switch-smoke]', ...args);
           // effort "max", which the fake model does not offer: the first child
           // must run on the model default instead of failing at dispatch.
           assert.equal(first.effort, undefined, 'an incompatible level is dropped on the first request');
-          assert.equal(first.maxTokens, 128000, 'the first request keeps the configured cap');
+          // 0.8.6: a cap above the model's declared default is clamped on the
+          // first request too (the fake model declares 4096).
+          assert.equal(first.maxTokens, 4096, 'an oversized configured cap is clamped to the model default');
 
           writeRoles('route-b', 'high', 999999);
           const second = await request();

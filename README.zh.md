@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.5 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.6 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -18,6 +18,12 @@
 
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
+
+> **0.8.6（2026-10-28）：输出上限归模型，不再归角色。** 出厂不再给任何角色预置 `maxTokens`：
+> 跟随会话时用主对话的上限，固定模型时用该模型自己的默认上限，只有你在「高级」里显式填了才按你的值
+> （超过模型声明的默认值会被 clamp）。固定到另一个模型时，子代理不会再继承主对话的 token 上限。
+> 原来的 oracle 128k / fixer 96k 等数字是本项目自造的（oh-my-opencode-slim 没有这个概念），
+> 也是「角色预算超过模型上限」这类失败的根源。完整说明见 [CHANGELOG.md](./CHANGELOG.md)。
 
 > **0.8.5（2026-10-28）：角色默认继承会话模型。** 随包不再给六个角色指定 provider/model，也不固定
 > 思考强度：没有在卡片里选模型时，子代理跟随当前会话的主模型与档位；选了具体模型/档位才算覆盖。
@@ -52,8 +58,9 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
   支持时委派仍会成功：先退回会话档位（该模型声明过时），再退回模型默认，并记一条 warn。档位下拉里
   `none` 显示为「跟随会话（不指定）」、`off` 显示为「关闭思考」；把模型切回继承时，该角色的固定
   档位会在同一次编辑里自动清为跟随。固定了模型的角色仍按该模型校验。
-- **token 上限也跟随路由**：继承模型时由主对话/该模型决定，卡片「高级」里的 token 上限不可编辑
-  （固定模型后才可单独设置）——按角色写死的预算可能超过新主模型的输出上限。温度、工具、提示词、
+- **输出上限归模型，不归角色**（0.8.6）：角色不预置 `maxTokens`。跟随会话时用主对话的上限；
+  固定模型时默认用该模型的默认上限，卡片「高级 → token 上限」留空即可，填了才生效（超过模型声明
+  的默认值会被 clamp）；固定到另一个模型时不再继承主对话的上限。温度、工具、提示词、
   MCP 等角色属性不跟随，它们与模型能力无关。
 - 角色继承全局工具，只读角色 deny `edit`/`write`；全部角色 deny 控制类工具（`skill`、`job_kill`、
   `job_list`、`job_output`、`todo_write`、`ask_user_question`），禁止继续委派（`maxDepth: 1`）。
@@ -94,7 +101,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.8.5
+oh-my-dsh-slim@0.8.6
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -104,7 +111,7 @@ oh-my-dsh-slim@0.8.5
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.5
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.6
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：

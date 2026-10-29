@@ -162,6 +162,64 @@ test('a followed role keeps the resolved values when the session route cannot be
   assert.match(warnings.join('\n'), /metadata is unavailable/);
 });
 
+test('a pinned route on another model does not inherit the session cap', async () => {
+  // The host copies the parent's maxTokens into the child unconditionally. A
+  // pinned route must not wear a cap that belongs to the session's model: the
+  // target model has its own limit, so no cap is sent and its default applies.
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 384000 };
+  const { result } = await run({
+    profiles: profile({ provider: 'openrouter', model: 'qwen3-coder', effort: 'none', temperature: 0.1 }),
+    info: { [QWEN]: { reasoning: { efforts: [{ id: 'high' }] } } },
+    resolved,
+    parent: { provider: BASE, model: PRO, reasoningEffort: 'max', maxTokens: 384000 },
+  });
+  assert.equal(result.provider, 'openrouter');
+  assert.equal('maxTokens' in result, false, 'the target model decides, not the session');
+});
+
+test('a pinned route on the session model keeps the session cap', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 384000 };
+  const { result } = await run({
+    profiles: profile({ provider: BASE, model: PRO, effort: 'none', temperature: 0.1 }),
+    resolved,
+    parent: { provider: BASE, model: PRO, reasoningEffort: 'max', maxTokens: 384000 },
+  });
+  assert.deepEqual(result, resolved, 'the cap belongs to the same model, so nothing changes');
+});
+
+test('a pinned route applies its own cap and clamps it to the target model', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 384000 };
+  const { result } = await run({
+    profiles: profile({ provider: 'openrouter', model: 'qwen3-coder', effort: 'none', temperature: 0.1, maxTokens: 64000 }),
+    info: { [QWEN]: { reasoning: { efforts: [{ id: 'high' }] }, defaultMaxTokens: 32000 } },
+    resolved,
+    parent: { provider: BASE, model: PRO, reasoningEffort: 'max', maxTokens: 384000 },
+  });
+  assert.equal(result.maxTokens, 32000, 'the role cap is applied and clamped to the model default');
+});
+
+test('a pinned role cap larger than the model default is clamped on the first request', async () => {
+  // Nothing reroutes on the first request of a session, so the clamp cannot
+  // ride the reroute branch: a stored 128k on a 32k model must still be lowered.
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 128000 };
+  const { result } = await run({
+    profiles: profile({ provider: BASE, model: PRO, effort: 'none', temperature: 0.1, maxTokens: 128000 }),
+    info: { [BASE + '/' + PRO]: { reasoning: { efforts: [{ id: 'high' }] }, defaultMaxTokens: 32000 } },
+    resolved,
+  });
+  assert.equal(result.maxTokens, 32000, 'the model default caps an oversized role budget');
+});
+
+test('a pinned cap survives when the model metadata is unavailable', async () => {
+  const resolved = { provider: BASE, model: PRO, reasoningEffort: 'max', temperature: 0.1, maxTokens: 128000 };
+  const { result } = await run({
+    profiles: profile({ provider: BASE, model: PRO, effort: 'none', temperature: 0.1, maxTokens: 128000 }),
+    info: {},
+    resolved,
+  });
+  assert.deepEqual(result, resolved, 'a failed lookup keeps the saved cap');
+});
+
 test('a role with no route keeps the session route and applies only its own knobs', async () => {
   // Issue #11: this is the shipped default — no provider/model means the child
   // follows the session's main model, while the role's effort/temperature still

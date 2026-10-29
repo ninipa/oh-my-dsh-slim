@@ -28,8 +28,14 @@ window.__ModuleLoader__.load({
     // which makes React throw #130 and the whole settings section render empty.
     // Structural components are still checked below; unknown names render nothing.
     const uiPrimitives = require('@deepseek-ai/dsh-client-ui-primitives');
+    // ONE sentinel for "absent", because `icon()` below has to tell a real
+    // component from the stand-in. Returning a fresh `() => null` per unknown
+    // name made every candidate look present, so the fallback chain stopped at
+    // its first entry — that is how the advanced toggle lost its chevron on
+    // 0.2.1, where every icon now ends in `Outline(Medium|Regular)`.
+    const MISSING_PRIMITIVE = () => null;
     const ui = new Proxy(uiPrimitives, {
-      get: (target, prop) => (prop in target ? target[prop] : () => null),
+      get: (target, prop) => (prop in target ? target[prop] : MISSING_PRIMITIVE),
     });
 
     const NS = 'oh-my-dsh-slim';
@@ -37,7 +43,7 @@ window.__ModuleLoader__.load({
     // no build step or package metadata, so this is a literal; T0 and
     // client-card.test.mjs compare it with package.json so a release bump
     // cannot silently leave the header stale.
-    const VERSION = '0.8.5';
+    const VERSION = '0.8.6';
     const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
@@ -220,10 +226,17 @@ window.__ModuleLoader__.load({
       const keys = [];
       if (seats.length === 1) keys.push('councilNeedsSeats');
       if (seats.length >= MIN_COUNCIL_SEATS) {
+        // "Repeat sample" needs BOTH axes to be identical. Three seats on one
+        // model with three different seat prompts are still correlated samples,
+        // but they are not the same question asked three times — and the plain
+        // warning said exactly that, which made it fire on every default
+        // configuration once roles began inheriting the session model.
+        const prompts = seats.map((roleId) => String(draft.roles[roleId].personaAppend ?? '').trim());
+        const distinctPrompts = prompts.every((prompt) => prompt !== '') && new Set(prompts).size === seats.length;
         const inherited = seats.filter((roleId) => !draft.roles[roleId].provider || !draft.roles[roleId].model);
-        if (inherited.length > 0) keys.push('councilInheritedModels');
+        if (inherited.length > 0) keys.push(distinctPrompts ? 'councilInheritedModelsDistinct' : 'councilInheritedModels');
         else if (new Set(seats.map((roleId) => `${draft.roles[roleId].provider}/${draft.roles[roleId].model}`)).size === 1) {
-          keys.push('councilSameModel');
+          keys.push(distinctPrompts ? 'councilSameModelDistinct' : 'councilSameModel');
         }
       }
       return keys;
@@ -250,11 +263,16 @@ window.__ModuleLoader__.load({
     // `16` suffix). Icons are cosmetic: resolve the first available name and
     // render nothing when the host ships none of them, instead of disabling
     // the whole card over a missing glyph.
-    const ICON_CHECK = ['IconCheckOutline16', 'IconCheckOutline', 'IconCheckOutlineRegular'];
-    const ICON_WARNING = ['IconWarningOutline16', 'IconWarningOutline', 'IconWarningOutlineRegular'];
-    const ICON_CHEVRON = ['IconChevronDownOutline14', 'IconChevronDownOutline', 'IconChevronDownOutlineRegular'];
+    const ICON_CHECK = ['IconCheckOutline16', 'IconCheckOutlineMedium', 'IconCheckOutline', 'IconCheckOutlineRegular'];
+    const ICON_WARNING = ['IconWarningOutline16', 'IconWarningOutlineMedium', 'IconWarningOutline', 'IconWarningOutlineRegular'];
+    const ICON_CHEVRON = ['IconChevronDownOutline14', 'IconChevronDownOutlineMedium', 'IconChevronDownOutline', 'IconChevronDownOutlineRegular'];
     function icon(mod, names) {
-      for (const name of names) if (mod?.[name] !== undefined && mod[name] !== null) return mod[name];
+      for (const name of names) {
+        const candidate = mod?.[name];
+        // The proxy answers every unknown name with MISSING_PRIMITIVE, so the
+        // sentinel — not `undefined` — is what a missing glyph looks like here.
+        if (candidate !== undefined && candidate !== null && candidate !== MISSING_PRIMITIVE) return candidate;
+      }
       return null;
     }
     function renderIcon(mod, names, props) {
@@ -288,7 +306,8 @@ window.__ModuleLoader__.load({
       advanced: '高级',
       advancedWarn: '非必要不要修改默认值，可能改变插件行为。',
       maxTokens: 'token 上限',
-      maxTokensFollowHint: '跟随会话模型时，输出上限由主对话决定；固定模型后可单独设置。',
+      maxTokensFollowHint: '跟随会话模型时，输出上限由主对话决定；固定模型后留空，则使用该模型自己的默认上限。',
+      maxTokensEmptyHint: '留空 = 使用该模型自己的默认上限；只有需要限制输出长度时才填。',
       temperature: '温度',
       observerLocked: '本版本锁定：待上游支持委派附件转发（deepseek-harness #4297）后重新评估。',
       save: '保存',
@@ -325,8 +344,12 @@ window.__ModuleLoader__.load({
       councilNeedsSeats: 'Council 需要至少 2 个议员；只开 1 个时该席位作为普通只读委派使用。',
       councilInheritedModels: '有席位未配置模型，将继承当前会话模型；若全部继承，议会只是同一模型的重复采样。',
       councilSameModel: '建议为议员选择不同模型：相同模型的“议会”只是重复采样。',
+      councilInheritedModelsDistinct: '有席位未配置模型，将继承当前会话模型；席位提示词不同、视角有别，但同模型的样本仍高度相关。',
+      councilSameModelDistinct: '各席位提示词不同、视角有别；但相同模型的样本仍高度相关，要真正多模型评审请为席位选择不同模型。',
       personaAppend: '席位提示词（追加）',
-      personaAppendHint: '例如：特别关注并发与失败恢复。',
+      personaAppendHint: '留空：由主模型按任务给各席分配视角；填写后该视角固定生效。例如：特别关注并发与失败恢复。',
+      councilPrompt: '合成提示词（追加）',
+      councilPromptHint: '例如：先列出分歧点，再给出结论。',
       personaAppendInvalid: '提示词不能包含 {{...}}，且不超过 8000 字符。',
       profile: '委派配置',
       bundledProfile: '极简角色委派',
@@ -356,7 +379,7 @@ window.__ModuleLoader__.load({
       profileMigrated: '已迁移该配置',
       profileMigrateFailed: '迁移失败，请查看宿主日志后重试。',
       profileSaveFailed: '配置保存失败，请检查后重试；当前编辑内容已保留。',
-      profileConflict: '配置已被其他窗口修改，请重新加载后再保存。',
+      profileConflict: '保存被拒绝：配置可能已被其他窗口修改，或该取值不被接受。已重新载入最新配置，请再保存一次。',
       profileDefaultFailed: '新会话默认设置失败，请重试。',
       defaultSet: '已设为新会话默认',
       deleteProfile: '删除',
@@ -384,7 +407,8 @@ window.__ModuleLoader__.load({
       advanced: 'Advanced',
       advancedWarn: 'Avoid changing these defaults; they can alter plugin behavior.',
       maxTokens: 'Max tokens',
-      maxTokensFollowHint: 'With an inherited model the main conversation decides the output cap; pin a model to set it here.',
+      maxTokensFollowHint: 'With an inherited model the main conversation decides the output cap; a pinned model uses the model default when left empty.',
+      maxTokensEmptyHint: 'Empty = the model\u2019s own default output cap; fill this only to bound the output.',
       temperature: 'Temperature',
       observerLocked: 'Locked in this version: re-evaluate once upstream forwards attachments into delegated subagents (deepseek-harness #4297).',
       save: 'Save',
@@ -421,8 +445,12 @@ window.__ModuleLoader__.load({
       councilNeedsSeats: 'A council needs at least 2 seats; a single enabled seat runs as an ordinary read-only delegation.',
       councilInheritedModels: 'Some seats inherit the session model (no provider/model set); if every seat inherits, the council becomes a repeat sample of one model.',
       councilSameModel: 'Give the seats different models: identical models make the council a repeat sample.',
+      councilInheritedModelsDistinct: 'Some seats inherit the session model. Their seat prompts differ, so the angles do — but samples from one model stay correlated.',
+      councilSameModelDistinct: 'The seat prompts differ, so the angles do; samples from one model still stay correlated. Pick different models for a true multi-model review.',
       personaAppend: 'Seat prompt (appended)',
-      personaAppendHint: 'e.g. Focus on concurrency and failure recovery.',
+      personaAppendHint: 'Empty: the main model assigns each seat a focus per task; a value here fixes the angle. e.g. Focus on concurrency and failure recovery.',
+      councilPrompt: 'Synthesis prompt (appended)',
+      councilPromptHint: 'e.g. List the disagreements first, then the verdict.',
       personaAppendInvalid: 'Prompt must not contain {{...}} and must stay under 8000 characters.',
       profile: 'Delegation configuration',
       bundledProfile: 'Minimal Role Delegation',
@@ -452,7 +480,7 @@ window.__ModuleLoader__.load({
       profileMigrated: 'Configuration migrated',
       profileMigrateFailed: 'Migration failed; check the host log and retry.',
       profileSaveFailed: 'Could not save the configuration. Your edits are still here.',
-      profileConflict: 'This configuration changed in another window. Reload it before saving again.',
+      profileConflict: 'The save was rejected: the configuration may have changed in another window, or a value was refused. The latest configuration has been reloaded \u2014 try saving again.',
       profileDefaultFailed: 'Could not change the new-session default. Try again.',
       defaultSet: 'Default for new sessions set',
       deleteProfile: 'Delete',
@@ -555,9 +583,16 @@ window.__ModuleLoader__.load({
         }
         for (const field of ADVANCED_FIELDS) {
           const path = ['advanced', 'roles', roleId, field];
-          const dv = d[field];
+          // The draft holds what the input element reports: a STRING, and ''
+          // once the user clears it. The namespace document requires a
+          // positive integer, so writing the raw value rejected the whole
+          // document — the save looked impossible even after the field was
+          // emptied. Coerce here (the card already gates saving on a valid
+          // number) and treat an empty box as "unset".
+          const raw = d[field];
+          const dv = raw === undefined || raw === '' ? undefined : parseAdvancedNumber(raw, field);
           const uv = getPath(user, path);
-          if (dv === undefined) {
+          if (dv === undefined || dv === null) {
             if (uv !== undefined) ops.push({ op: 'unset', path });
           } else if (!deepEqualJson(uv, dv)) {
             ops.push({ op: 'set', path, value: dv });
@@ -958,8 +993,11 @@ window.__ModuleLoader__.load({
       }, React.createElement('span', { style: knob }));
     }
 
-    function Field({ label, children, hint }) {
-      return React.createElement('label', { style: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: '1 1 160px' } },
+    function Field({ label, children, hint, grow = true }) {
+      // `grow` is the horizontal layout's default (controls share one row).
+      // In a COLUMN container the same `1 1 160px` becomes a 160px-tall floor,
+      // which is what left a band of empty space under the seat-prompt box.
+      return React.createElement('label', { style: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: grow ? '1 1 160px' : '0 0 auto' } },
         React.createElement('span', { style: { fontSize: 12, lineHeight: '18px', color: color.secondary } }, label),
         children,
         hint ? React.createElement('span', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, hint) : null,
@@ -1099,10 +1137,21 @@ window.__ModuleLoader__.load({
             effortOptions.map((option) => React.createElement('option', { key: option.value, value: option.value }, effortLabel(option, t))),
           ),
           React.createElement('button', {
+            // The label is text, not just a glyph: an icon-only control
+            // disappeared outright whenever the host renamed the icon set
+            // (0.2.1 → `OutlineMedium`), which made the advanced fields — the
+            // only place to set maxTokens or temperature — unreachable.
             type: 'button', 'aria-label': t('advanced'), 'aria-expanded': advOpen,
             onClick: onAdvancedToggle,
-            style: { background: 'none', border: 'none', cursor: 'pointer', color: color.tertiary, padding: 4, flex: 'none' },
-          }, renderIcon(ui, ICON_CHEVRON, { size: 14, style: { transform: advOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s' } })),
+            style: {
+              background: 'none', border: 'none', cursor: 'pointer', color: color.tertiary,
+              padding: '2px 4px', flex: 'none', display: 'flex', alignItems: 'center', gap: 2,
+              fontSize: 11, lineHeight: '16px', fontFamily: 'inherit',
+            },
+          },
+            t('advanced'),
+            renderIcon(ui, ICON_CHEVRON, { size: 14, style: { transform: advOpen ? 'rotate(180deg)' : 'none', transition: 'transform .12s' } }),
+          ),
         ),
         hintKey ? React.createElement('div', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t(hintKey)) : null,
         effortBad ? React.createElement('div', { style: { fontSize: 12, lineHeight: '16px', color: 'var(--dsw-alias-state-error-primary)' } },
@@ -1122,12 +1171,26 @@ window.__ModuleLoader__.load({
                 onChange: (e) => onChange(roleId, { temperature: e.target.value }), style: controlStyle,
               })),
           ),
-          !routed ? React.createElement('span', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('maxTokensFollowHint')) : null,
-          COUNCIL_ROLE_IDS.includes(roleId) ? React.createElement(Field, { label: t('personaAppend') },
+          !routed
+            ? React.createElement('span', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('maxTokensFollowHint'))
+            : (role.maxTokens === undefined || role.maxTokens === '')
+              ? React.createElement('span', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('maxTokensEmptyHint'))
+              : null,
+          COUNCIL_ROLE_IDS.includes(roleId) ? React.createElement(Field, {
+            label: t(roleId === COUNCIL_ROLE_ID ? 'councilPrompt' : 'personaAppend'),
+            grow: false,
+          },
             React.createElement('textarea', {
-              value: role.personaAppend ?? '', rows: 3, placeholder: t('personaAppendHint'), disabled: locked,
+              value: role.personaAppend ?? '', rows: 3,
+              placeholder: t(roleId === COUNCIL_ROLE_ID ? 'councilPromptHint' : 'personaAppendHint'), disabled: locked,
               onChange: (e) => onChange(roleId, { personaAppend: e.target.value === '' ? undefined : e.target.value }),
-              style: { ...controlStyle, minHeight: 56, resize: 'vertical', fontFamily: 'inherit', width: '100%' },
+              // controlStyle carries `height: 30` (single-line) and a
+              // content-box width of 100%: the box would both hug the top and
+              // spill past the card's padding by its own padding + border.
+              style: {
+                ...controlStyle, height: 'auto', padding: '6px 8px', boxSizing: 'border-box',
+                minHeight: 56, resize: 'vertical', fontFamily: 'inherit', width: '100%',
+              },
             })) : null,
           (invalid.maxTokens || invalid.temperature || invalid.personaAppend) ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } },
             invalid.personaAppend ? t('personaAppendInvalid') : invalid.maxTokens ? t('invalidMaxTokens') : t('invalidTemperature')) : null,
@@ -1138,6 +1201,22 @@ window.__ModuleLoader__.load({
     }
 
     // -------------------------------------------------------------- card
+    /**
+     * The revision fence to send with a write.
+     *
+     * React state lags the host: `mutate` bumps the revision, and the row
+     * restart that follows can bump it again before the next render. Reading
+     * the live snapshot keeps a second save possible without a manual reload.
+     */
+    function liveRevision(scope, fallback) {
+      try {
+        const current = scope?.getSnapshot?.();
+        return current?.revision ?? fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
     function SettingsCard({ scope, connection, remote, t }) {
       const [snap, setSnap] = React.useState(scope.getSnapshot());
       React.useEffect(() => scope.subscribe(() => setSnap(scope.getSnapshot())), [scope]);
@@ -1300,11 +1379,25 @@ window.__ModuleLoader__.load({
           // multi-level paths (presets.<preset>.<role>.<field>) go through
           // one atomic mutate(ops) — the documented replacement for the
           // 0.1.1 per-op scope.write (which is gone).
-          const result = await writeSettings(scope, writeOps, snap.revision);
+          //
+          // The fence comes from the LIVE snapshot, not from React state: an
+          // accepted mutation bumps the revision, and the settings row is
+          // restarted right after it, which can bump it again. The state copy
+          // is then one generation behind, and the next save is rejected as
+          // "changed in another window" although the user is the only writer —
+          // and stays rejected on every retry because nothing refreshes it.
+          let result = await writeSettings(scope, writeOps, liveRevision(scope, snap.revision));
+          if (!result.ok && result.reason === 'conflict') {
+            result = await writeSettings(scope, writeOps, liveRevision(scope, snap.revision));
+          }
           if (!result.ok) {
+            // Resync either way so a manual retry starts from what the host
+            // actually holds now instead of repeating the same stale fence.
+            setSnap(scope.getSnapshot());
             setProfileError(t(result.reason === 'conflict' ? 'profileConflict' : 'profileSaveFailed'));
             return false;
           }
+          setSnap(scope.getSnapshot());
           setDraft(undefined);
           setToast({ text: doneText, icon: renderIcon(ui, ICON_CHECK, { size: 14 }) });
           return true;
@@ -1749,7 +1842,9 @@ window.__ModuleLoader__.load({
         ),
       },
         React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-          React.createElement(Field, { label: t('displayName') },
+          // Same column-container trap as the seat prompt: without this the
+          // new-profile dialog reserves a 160px-tall field for one text input.
+          React.createElement(Field, { label: t('displayName'), grow: false },
             React.createElement(ui.Input, {
               value: nameModal.input,
               disabled: saving,
@@ -1888,6 +1983,14 @@ window.__ModuleLoader__.load({
     exports.selectionInRoster = selectionInRoster;
     exports.profileSaveMode = profileSaveMode;
     exports.writeSettings = writeSettings;
+    exports.liveRevision = liveRevision;
+    // Icon resolution is exported for the regression test: the card's advanced
+    // toggle became invisible on hosts that renamed every glyph to
+    // `OutlineMedium`, and an icon-only control has no other trace to assert.
+    exports.ICON_CHEVRON = ICON_CHEVRON;
+    exports.ICON_CHECK = ICON_CHECK;
+    exports.ICON_WARNING = ICON_WARNING;
+    exports.resolveIcon = (names) => icon(ui, names);
     return module.exports;
   },
 });

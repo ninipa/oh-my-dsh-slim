@@ -214,9 +214,18 @@ async function requestConfig(ctx, payload, resolved) {
   // header is the route this child would inherit if it were created now; the
   // spawn options are only the mount-time snapshot of the same source.
   const following = !(text(configured.provider) && text(configured.model));
-  const parent = following ? parentRoute(ctx, payload.agent) : undefined;
+  // Read the session route for BOTH cases: a pinned role still needs it to
+  // tell the session's output cap apart from a cap that belongs to this model.
+  const parent = parentRoute(ctx, payload.agent);
   const target = targetRoute(configured, resolved, parent);
   const changed = routeChanged(target, resolved);
+  // A pinned route that names a different model than the session must not
+  // inherit the session's output cap: the host copies it unconditionally, and
+  // the target model may have a smaller limit. A cap the role names explicitly
+  // still wins; without one the target model's own default applies.
+  const foreignCap = !following && parent !== undefined
+    && (parent.provider !== target.provider || parent.model !== target.model)
+    && typeof configured.maxTokens !== 'number';
   const effort = configured.effort;
   const effortRequested = text(effort) && effort !== 'none';
   // Metadata answers two questions: whether the saved route differs from the
@@ -233,16 +242,35 @@ async function requestConfig(ctx, payload, resolved) {
   // the parent's level or cap onto another model is exactly the kind of
   // mismatch this row exists to prevent.
   const onSessionRoute = parent !== undefined && (!changed || reroute);
+  // An explicit cap on an already-mounted pinned route still has to respect the
+  // model's declared default; the first request of a session never takes the
+  // reroute branch, so it needs its own (silent, fail-open) lookup.
+  const capInfo = !following && !changed && typeof configured.maxTokens === 'number' && info === undefined
+    ? await resolveRoute(ctx, target, facts, true)
+    : info;
   const patch = {};
   let dropEffort = false;
-  let dropMaxTokens = false;
+  let dropMaxTokens = foreignCap && resolved?.maxTokens !== undefined;
 
   if (reroute) {
     patch.provider = target.provider;
     patch.model = target.model;
-    if (typeof info?.defaultMaxTokens === 'number' && typeof resolved?.maxTokens === 'number' && info.defaultMaxTokens < resolved.maxTokens) {
-      patch.maxTokens = info.defaultMaxTokens;
+    if (!foreignCap) {
+      // A pinned role's own cap is authoritative; anything larger than the
+      // target model's declared default is clamped.
+      const modelCap = typeof capInfo?.defaultMaxTokens === 'number' ? capInfo.defaultMaxTokens : undefined;
+      const roleCap = typeof configured.maxTokens === 'number' ? configured.maxTokens : undefined;
+      const cap = roleCap === undefined
+        ? (typeof resolved?.maxTokens === 'number' && modelCap !== undefined ? Math.min(resolved.maxTokens, modelCap) : undefined)
+        : (modelCap === undefined ? roleCap : Math.min(roleCap, modelCap));
+      if (cap !== undefined && cap !== resolved?.maxTokens) patch.maxTokens = cap;
     }
+  } else if (!following && typeof configured.maxTokens === 'number') {
+    // First request of a pinned role: the cap came from the role itself at
+    // mount, so nothing would ever clamp it. Honour the model's declared
+    // default here too (fail-open when the lookup is unavailable).
+    const modelCap = typeof capInfo?.defaultMaxTokens === 'number' ? capInfo.defaultMaxTokens : undefined;
+    if (modelCap !== undefined && configured.maxTokens > modelCap) patch.maxTokens = modelCap;
   }
 
   // The effort lands on the route the request will actually run on: the

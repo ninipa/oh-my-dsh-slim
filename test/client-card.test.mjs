@@ -319,6 +319,34 @@ console.log('\n[council card]');
     'councillor-alpha': { enabled: true, provider: 'a', model: 'm1' },
     'councillor-beta': { enabled: true },
   })).join(',') === 'councilInheritedModels', 'a mixed set still warns about the inherited seat');
+
+  // "Repeat sample" needs identical models AND identical seat prompts: three
+  // seats on one model with three different prompts differ in angle, so the
+  // plain warning overstated the case (and fired on every default config once
+  // roles began inheriting the session model).
+  const distinctSeats = {
+    'councillor-alpha': { enabled: true, personaAppend: '发布工程与回滚风险' },
+    'councillor-beta': { enabled: true, personaAppend: '产品价值与用户预期' },
+    'councillor-gamma': { enabled: true, personaAppend: '正确性与安全边界' },
+  };
+  check(card.councilWarningKeys(warnDraft(distinctSeats)).join(',') === 'councilInheritedModelsDistinct',
+    'distinct seat prompts downgrade the inherited-model warning');
+  check(card.councilWarningKeys(warnDraft({
+    ...distinctSeats,
+    'councillor-alpha': { ...distinctSeats['councillor-alpha'], provider: 'a', model: 'm1' },
+    'councillor-beta': { ...distinctSeats['councillor-beta'], provider: 'a', model: 'm1' },
+    'councillor-gamma': { ...distinctSeats['councillor-gamma'], provider: 'a', model: 'm1' },
+  })).join(',') === 'councilSameModelDistinct', 'distinct seat prompts downgrade the same-model warning');
+  check(card.councilWarningKeys(warnDraft({
+    ...distinctSeats,
+    'councillor-beta': { ...distinctSeats['councillor-beta'], personaAppend: '发布工程与回滚风险' },
+  })).join(',') === 'councilInheritedModels', 'a duplicated seat prompt keeps the plain warning');
+  check(card.councilWarningKeys(warnDraft({
+    ...distinctSeats,
+    'councillor-gamma': { ...distinctSeats['councillor-gamma'], personaAppend: '   ' },
+  })).join(',') === 'councilInheritedModels', 'a blank seat prompt keeps the plain warning');
+  check(source.includes("councilInheritedModelsDistinct: '有席位未配置模型") && source.includes('councilSameModelDistinct:'),
+    'the downgraded warnings are localized');
   check(source.includes('personaAppend') && source.includes('textarea'), 'seat prompt input is part of the card bundle');
   check(source.includes('DERIVED_ENABLED_ROLES'), 'derived-enabled roles are declared');
 
@@ -698,6 +726,8 @@ console.log('\n[model-scoped effort options (flash+medium regression)]');
     'picking a concrete model leaves the effort alone');
   check(source.includes('disabled: locked || !routed') && source.includes("t('maxTokensFollowHint')"),
     'the output cap is inert and explained while the model is inherited');
+  check(source.includes("t('maxTokensEmptyHint')"),
+    'a pinned role with an empty cap explains that the model default applies');
 
   const mismatch = (effort, provider, model) => card.effortMismatch(effort, CATALOG.groups, provider, model);
   check(mismatch('medium', 'deepseek-official', 'deepseek-v4-flash') === true, 'flash + medium flagged as mismatch');
@@ -795,6 +825,115 @@ console.log('\n[model inherit (issue #11)]');
     'picking a model writes both halves');
 }
 
+// --------------------------------------------------- host icon generations
+// 0.2.1 renamed every primitive glyph to `Icon…Outline(Medium|Regular)`: the
+// legacy `16`/`14` suffixes and the bare `Icon…Outline` form are gone. The
+// advanced toggle used to be an icon-only button, so a glyph that resolved to
+// nothing left no control at all — the card simply appeared to have no
+// advanced section, hiding maxTokens and temperature behind an invisible
+// 8px hotspot.
+console.log('\n[host icon generations]');
+{
+  const modern = {
+    Button: {}, Input: {}, Toast: {}, Modal: {},
+    IconCheckOutlineMedium: { id: 'check-medium' },
+    IconWarningOutlineMedium: { id: 'warning-medium' },
+    IconChevronDownOutlineMedium: { id: 'chevron-medium' },
+  };
+  const modernCard = materialize({ primitives: modern }).exports;
+  check(modernCard.resolveIcon(modernCard.ICON_CHEVRON)?.id === 'chevron-medium',
+    'the 0.2.1 chevron name resolves (OutlineMedium)');
+  check(modernCard.resolveIcon(modernCard.ICON_WARNING)?.id === 'warning-medium',
+    'the 0.2.1 warning glyph resolves, so role warnings are visible again');
+  const legacyOnly = { Button: {}, Input: {}, IconChevronDownOutline14: { id: 'chevron-legacy' } };
+  check(materialize({ primitives: legacyOnly }).exports.resolveIcon(card.ICON_CHEVRON)?.id === 'chevron-legacy',
+    'a legacy 14-suffix host still resolves its own glyph');
+  const bareOnly = { Button: {}, Input: {}, IconChevronDownOutline: { id: 'chevron-bare' } };
+  check(materialize({ primitives: bareOnly }).exports.resolveIcon(card.ICON_CHEVRON)?.id === 'chevron-bare',
+    'the bare Icon…Outline form still resolves');
+  const glyphless = materialize({ primitives: { Button: {}, Input: {} } }).exports;
+  check(glyphless.resolveIcon(glyphless.ICON_CHEVRON) === null,
+    'a host without any known glyph yields null, not a stand-in component');
+  const at = source.indexOf("'aria-label': t('advanced')");
+  const toggle = at < 0 ? '' : source.slice(at, at + 800);
+  check(toggle.includes("t('advanced'),") && toggle.includes('renderIcon(ui, ICON_CHEVRON'),
+    'the advanced toggle carries a text label as well as the glyph');
+}
+
+// ------------------------------------------------------- advanced layout
+// `Field` defaults to the horizontal control row (`flex: 1 1 160px`). Reused
+// inside a COLUMN container that basis becomes a 160px-tall floor, which is
+// what opened a band of empty space under the seat-prompt textarea; the
+// textarea also inherited the single-line `height: 30` and a content-box
+// width, so it hugged the top and spilled past the card's padding.
+console.log('\n[advanced layout]');
+{
+  check(source.includes("flex: grow ? '1 1 160px' : '0 0 auto'"),
+    'a field can opt out of the horizontal flex sizing');
+  const at = source.indexOf('COUNCIL_ROLE_IDS.includes(roleId) ? React.createElement(Field');
+  const block = at < 0 ? '' : source.slice(at, at + 1000);
+  check(block.includes('grow: false'),
+    'the seat prompt sits in a column, so it no longer reserves a 160px row');
+  check(block.includes("boxSizing: 'border-box'") && block.includes("height: 'auto'"),
+    'the textarea overrides the single-line height and the content-box width');
+  check(source.includes("t(roleId === COUNCIL_ROLE_ID ? 'councilPrompt' : 'personaAppend')"),
+    'the synthesizer names its prompt as a synthesis prompt, not a seat prompt');
+  check(source.includes("councilPrompt: '合成提示词（追加）'") && source.includes("councilPrompt: 'Synthesis prompt (appended)'"),
+    'the synthesis prompt is localized in both languages');
+  check(source.includes("React.createElement(Field, { label: t('displayName'), grow: false }"),
+    'the new-profile dialog uses the same non-growing field');
+}
+
+// ------------------------------------------------------- save fence freshness
+// `run()` used to send the revision captured in React state. An accepted
+// mutation bumps it, and the settings row restarts right after, which can bump
+// it again: the next save was then rejected as "changed in another window" and
+// stayed rejected forever — including after the user removed the value that
+// looked like the trigger.
+console.log('\n[save fence freshness]');
+{
+  check(typeof card.liveRevision === 'function', 'the fence resolver is exported for tests');
+  check(card.liveRevision({ getSnapshot: () => ({ revision: 'r2' }) }, 'r1') === 'r2',
+    'the live snapshot revision wins over the state copy');
+  check(card.liveRevision({}, 'r1') === 'r1', 'a scope without getSnapshot falls back to the state revision');
+  check(card.liveRevision({ getSnapshot: () => { throw new Error('gone'); } }, 'r1') === 'r1',
+    'a throwing snapshot falls back instead of blocking the write');
+  check(card.liveRevision({ getSnapshot: () => ({}) }, 'r1') === 'r1', 'a snapshot without a revision falls back');
+  check(source.includes('liveRevision(scope, snap.revision)'),
+    'the save path reads the fence live');
+  check((source.match(/liveRevision\(scope, snap\.revision\)/g) ?? []).length >= 2,
+    'a conflict is retried once with a freshly read fence');
+  check(source.includes('setSnap(scope.getSnapshot());') && source.includes("t(result.reason === 'conflict' ? 'profileConflict' : 'profileSaveFailed')"),
+    'a failed save resyncs the snapshot so a manual retry is not stuck');
+}
+
+// --------------------------------------------------- advanced write types
+// The advanced inputs report strings; the namespace document requires positive
+// integers. Writing the raw draft rejected the whole document, so the card
+// looked like it could not save at all — and an emptied box wrote '' instead of
+// unsetting the field.
+console.log('\n[advanced write types]');
+{
+  const base = JSON.parse(JSON.stringify(BASE));
+  const draft = card.buildDraft(base, base.advanced, base);
+  draft.roles.librarian.maxTokens = '384000';
+  draft.roles.librarian.temperature = '0.3';
+  const ops = card.planUserOps(base, {}, draft);
+  const maxSet = ops.find((op) => op.op === 'set' && op.path.join('.') === 'advanced.roles.librarian.maxTokens');
+  const tempSet = ops.find((op) => op.op === 'set' && op.path.join('.') === 'advanced.roles.librarian.temperature');
+  check(maxSet?.value === 384000 && typeof maxSet.value === 'number',
+    'a typed maxTokens is written as a number, not the input string');
+  check(tempSet?.value === 0.3 && typeof tempSet.value === 'number',
+    'a typed temperature is written as a number');
+  const cleared = card.buildDraft(base, base.advanced, base);
+  cleared.roles.librarian.maxTokens = '';
+  const unsetOps = card.planUserOps(base, { advanced: { roles: { librarian: { maxTokens: 384000 } } } }, cleared);
+  check(unsetOps.some((op) => op.op === 'unset' && op.path.join('.') === 'advanced.roles.librarian.maxTokens'),
+    'clearing the box unsets the field instead of writing an empty string');
+  check(!unsetOps.some((op) => op.op === 'set' && op.path.join('.') === 'advanced.roles.librarian.maxTokens'),
+    'no string value reaches the document');
+}
+
 console.log('\n[rc.2 contract + baseline preservation]');
 {
   const events = runApply(card);
@@ -803,7 +942,7 @@ console.log('\n[rc.2 contract + baseline preservation]');
   check(events.disposers?.length === 1, 'whileServed lifecycle disposer is owned by ctx.effect');
   events.disposers?.forEach((dispose) => dispose());
   check(events.disposed === true, 'disposing the client removes its whileServed registration');
-  check(source.includes('writeSettings(scope, writeOps, snap.revision)'), 'bundled settings writes pass the rc.2 revision fence');
+  check(source.includes('writeSettings(scope, writeOps, liveRevision(scope, snap.revision))'), 'bundled settings writes pass the rc.2 revision fence (read live, not from state)');
   check(source.includes('result === false'), 'a rejected write is surfaced instead of reported as saved');
   const legacy = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'legacy', 'v0.5.3', 'npm-package', 'client', 'client.js'), 'utf8');
   // The 0.8.0 council UI intentionally changes RoleRow and the card layout, so
@@ -833,6 +972,42 @@ console.log('\n[rc.2 contract + baseline preservation]');
   };
   const currentModelSelect = functionBlock(source, 'ModelSelect');
   const legacyModelSelect = functionBlock(legacy, 'ModelSelect');
+  // Field gained a `grow` switch: the horizontal default became conditional so
+  // a field inside a COLUMN container does not reserve a 160px-tall row.
+  const currentField = functionBlock(source, 'Field');
+  const legacyField = functionBlock(legacy, 'Field');
+  // 0.8.6: planUserOps coerces the advanced numeric fields before writing (the
+  // input reports strings, and the document requires integers) and treats an
+  // emptied box as unset. Normalize back to the legacy loop.
+  const currentAdvancedOps = `        for (const field of ADVANCED_FIELDS) {
+          const path = ['advanced', 'roles', roleId, field];
+          // The draft holds what the input element reports: a STRING, and ''
+          // once the user clears it. The namespace document requires a
+          // positive integer, so writing the raw value rejected the whole
+          // document — the save looked impossible even after the field was
+          // emptied. Coerce here (the card already gates saving on a valid
+          // number) and treat an empty box as "unset".
+          const raw = d[field];
+          const dv = raw === undefined || raw === '' ? undefined : parseAdvancedNumber(raw, field);
+          const uv = getPath(user, path);
+          if (dv === undefined || dv === null) {
+            if (uv !== undefined) ops.push({ op: 'unset', path });
+          } else if (!deepEqualJson(uv, dv)) {
+            ops.push({ op: 'set', path, value: dv });
+          }
+        }
+`;
+  const legacyAdvancedOps = `        for (const field of ADVANCED_FIELDS) {
+          const path = ['advanced', 'roles', roleId, field];
+          const dv = d[field];
+          const uv = getPath(user, path);
+          if (dv === undefined) {
+            if (uv !== undefined) ops.push({ op: 'unset', path });
+          } else if (!deepEqualJson(uv, dv)) {
+            ops.push({ op: 'set', path, value: dv });
+          }
+        }
+`;
   const derivedSkip = "          // council.enabled is derived from the seats; never write it.\n          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n";
   const derivedTextOps = "        for (const field of ADVANCED_TEXT_FIELDS) {\n          const path = ['advanced', 'roles', roleId, field];\n          const dv = d[field];\n          const uv = getPath(user, path);\n          if (dv === undefined || dv === '') {\n            if (uv !== undefined) ops.push({ op: 'unset', path });\n          } else if (!deepEqualJson(uv, dv)) {\n            ops.push({ op: 'set', path, value: dv });\n          }\n        }\n";
   const derivedTextAdvanced = "        for (const field of ADVANCED_TEXT_FIELDS) {\n          const value = role[field];\n          if (value === undefined || value === '' || deepEqualJson(value, baseRole[field])) continue;\n          advanced[field] = value;\n        }\n";
@@ -915,7 +1090,9 @@ console.log('\n[rc.2 contract + baseline preservation]');
       // option and stops rendering the catalog notice as the selected value;
       // the behavioral checks above cover the new control.
       .replaceAll(currentModelSelect, legacyModelSelect ?? currentModelSelect)
+      .replaceAll(currentField, legacyField ?? currentField)
       .replaceAll(derivedSkip, '')
+      .replaceAll(currentAdvancedOps, legacyAdvancedOps)
       .replaceAll("          if (field === 'enabled' && DERIVED_ENABLED_ROLES.has(roleId)) continue;\n", '')
       .replaceAll(derivedTextOps, '')
       .replaceAll(derivedTextAdvanced, '')

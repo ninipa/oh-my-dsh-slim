@@ -48,6 +48,20 @@ function fixture(t) {
 // the council family gets its own assertions below.
 const upstreamFace = (config) => ({ ...config, roles: Object.fromEntries(UPSTREAM_ROLE_IDS.map(id => [id, config.roles[id]])) });
 
+// 0.8.6 stops shipping a per-role output cap (the model owns it), while the
+// frozen 0.5.3 loader still injects one for the six upstream roles. Parity here
+// is about merge precedence, so the cap is normalized away on both sides; the
+// "no shipped cap" rule is pinned by package.test and the model-switch tests.
+const withoutCaps = (config) => ({
+  ...config,
+  roles: Object.fromEntries(Object.entries(config.roles).map(([roleId, role]) => {
+    if (role === null || typeof role !== 'object' || Array.isArray(role)) return [roleId, role];
+    const { maxTokens, ...rest } = role;
+    return [roleId, rest];
+  })),
+});
+const comparable = (config) => withoutCaps(upstreamFace(config));
+
 for (const [label, doc] of [
   ['factory defaults', {}],
   ['compact overrides and deny union', { roles: { oracle: { provider: 'prov', model: 'custom', deny: ['bash'], tools: [] } }, advanced: { roles: { oracle: { deny: ['read'], temperature: 0.8, personaAppend: 'append' } } } }],
@@ -57,7 +71,7 @@ for (const [label, doc] of [
   ['observer force disabled', { roles: { observer: { enabled: true } } }],
 ]) test('upstream config parity: ' + label, t => {
   const f = fixture(t); f.save(doc);
-  assert.deepEqual(upstreamFace(loadConfig()), upstreamFace(f.original.loadConfig()));
+  assert.deepEqual(comparable(loadConfig()), comparable(f.original.loadConfig()));
   assert.deepEqual(EFFORT_LEVELS, f.original.EFFORT_LEVELS);
 });
 
