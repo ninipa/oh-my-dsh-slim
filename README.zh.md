@@ -1,13 +1,13 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.6 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.7 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
 **orchestrator + 5 个启用的专职角色**，交付为从插件组合包挂载的**声明式原生 agent 预设**，
 不是独立应用，也不需要手工复制预设目录。
 
-> **宿主范围：`>=0.2.0-rc.2 <0.3.0-0`；实测宿主：DSH 0.2.0-rc.2 与 0.2.1-rc.2。**
+> **宿主范围：`>=0.2.0-rc.2 <0.3.0-0`；实测宿主：DSH 0.2.0-rc.2、0.2.1-rc.2、0.2.1-rc.3 与 0.2.1-rc.5。**
 > 门禁是 per-core 白名单：0.2.0 与 0.2.1 的预发布/稳定/后续补丁放行；更高 minor 或更高补丁的
 > 预发布 core（例如 `0.2.2-rc.1`）会被拒绝，直到有版本明确放行。
 > 升级策略：所需 API 不变时维持 0.2 版本线兼容，验证新宿主后才宣称实测支持；0.3 版本线另行审查。
@@ -18,6 +18,15 @@
 
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
+
+> **0.8.7（2026-10-30）：一行被上游退休，代价只该是一个工具，不是整套预设。** 已验证 DSH
+> **0.2.1-rc.5**：它的思考强度接口与 rc.3 逐字节相同（rc.4 只修了 ACP 模式下诊断输出混入 stdout，
+> rc.5 只改了思考内容的展示方式），所以这一版没有 effort 相关改动。修的是
+> [#10](https://github.com/ninipa/oh-my-dsh-slim/issues/10) 背后的故障模式：`resolvedDefinition`
+> 用 `requireHost.resolve` 逐行解析，只要有一个 `@deepseek-ai/*` 子路径不在了，异常就从 `apply()`
+> 抛出，整个预设条目不再激活——一个被退休的导出干掉了六个角色。现在「这一行在不在」由宿主决定的行
+> （目前是 `list_agents`）会跟着宿主 base 补丁走：宿主不再声明就静默省掉，声明了但入口解析不到就
+> 只跳过该行并警告一次；其它行仍然照旧硬失败——一个悄悄少了 `tool-fs` 的预设看起来健康，其实不是。
 
 > **0.8.6（2026-10-28）：输出上限归模型，不再归角色。** 出厂不再给任何角色预置 `maxTokens`：
 > 跟随会话时用主对话的上限，固定模型时用该模型自己的默认上限，只有你在「高级」里显式填了才按你的值
@@ -101,7 +110,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.8.6
+oh-my-dsh-slim@0.8.7
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -111,7 +120,7 @@ oh-my-dsh-slim@0.8.6
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.6
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.7
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：

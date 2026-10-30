@@ -31,8 +31,9 @@ Notes:
   fails at row resolution before the assertions. The web smoke resolves host rows from the anchor and
   needs no extra setup. The role-composition smoke boots `dsh-base` and therefore needs the same
   `$TMPDIR/node_modules/@deepseek-ai` link as the base smoke — point it at the host line under test.
-- Run every smoke once per supported line (`0.2.0-rc.2` and `0.2.1-rc.2`); the role smoke is the one
-  that exercises the 0.7.0 runtime channel end to end.
+- Run every smoke once per verified line — `0.2.0-rc.2`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.5`
+  (four lines, 28 runs as of 0.8.7); the role smoke is the one that exercises the 0.7.0 runtime channel
+  end to end.
 - `OMDS_SYMLINK_ANCHOR=1` reproduces an npm-global CLI install by pointing `process.argv[1]` at a
   symlink to `DSH_HOST_ANCHOR`. It requires a **plain Node host** anchor: an `app.asar` target cannot
   be realpath'd outside Electron, so the mode refuses asar anchors explicitly. Run both the normal

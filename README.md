@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.6 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.7 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -8,7 +8,7 @@ an orchestrator plus five enabled specialist roles, delivered as a **declarative
 preset**. It mounts from the plugin bundle; it is not a standalone application or a preset
 directory to copy.
 
-> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested hosts: DSH 0.2.0-rc.2 and 0.2.1-rc.2.** The gate is
+> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested hosts: DSH 0.2.0-rc.2, 0.2.1-rc.2, 0.2.1-rc.3 and 0.2.1-rc.5.** The gate is
 > a per-core allowlist: 0.2.0 and 0.2.1 prereleases, stable releases and later patches are admitted;
 > prereleases of a higher patch or minor core (for example `0.2.2-rc.1`) are refused until a release
 > admits them. Upgrade policy: retain compatibility within the 0.2 line while the required APIs
@@ -23,6 +23,17 @@ directory to copy.
 
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
+
+> **0.8.7 (2026-10-30): a retired host row costs one tool, not the preset.** DSH **0.2.1-rc.5**
+> verified; its thinking-effort surface is byte-identical to rc.3 (rc.4 fixed diagnostics leaking
+> into ACP stdout, rc.5 only changed how thinking content is displayed), so this release carries no
+> effort changes. It fixes the failure mode behind
+> [#10](https://github.com/ninipa/oh-my-dsh-slim/issues/10): `resolvedDefinition` resolved every row
+> with `requireHost.resolve`, so one missing `@deepseek-ai/*` subpath threw out of `apply()` and the
+> preset entry never activated — all six roles lost to one retired export. Rows whose existence the
+> host decides (currently `list_agents`) are now dropped when the host's own base patch stops
+> declaring them, and skipped with a single warning when their entry no longer resolves; every other
+> row still fails loudly, because a preset that silently loses `tool-fs` looks healthy and is not.
 
 > **0.8.6 (2026-10-28): the output cap belongs to the model, not the role.** No role ships a
 > `maxTokens` default any more: a followed role uses the session's cap, a pinned route uses the
@@ -134,7 +145,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.6
+oh-my-dsh-slim@0.8.7
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -144,7 +155,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.6
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.7
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules

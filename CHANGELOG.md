@@ -4,6 +4,41 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.7] — A retired host row costs one tool, not the preset
+
+DSH 0.2.1-rc.5 compatibility check, plus the failure mode behind
+[#10](https://github.com/ninipa/oh-my-dsh-slim/issues/10): one upstream row that an installed host
+no longer ships used to unmount the entire preset.
+
+- **0.2.1-rc.5 asks for no effort changes.** The upstream releases are narrow: rc.4 fixes
+  diagnostics leaking into ACP stdout (`console.info` → `console.error` in the DeepSeek account
+  adapter), rc.5 only changes how thinking content is displayed. Compared against rc.3, the six
+  packages that carry the effort surface — `dsh-llm`, `dsh-llm-deepseek`, `dsh-llm-pi-ai`,
+  `dsh-subagent`, `dsh-agent-loop`, `dsh-tool-subagent` — are byte-identical, and so is
+  `dsh-base/cordis.patch.yml`. The effort vocabulary (`off/low/high/max` on the DeepSeek adapter,
+  `off/minimal/low/medium/high/xhigh/max` on pi-ai), `defaultEffort` derivation, the
+  reject-unsupported-effort rule in `resolveCallConfig`, and the parent→child `maxTokens` copy all
+  behave exactly as on rc.3, so following, pinning, falling back and clamping are untouched.
+  Only ten JavaScript files differ across the whole host, all in client UI, account logging and an
+  `mcp-client` `resources/list` capability guard.
+- **A host-decided row follows the host's own composition.** `resolvedDefinition` resolved every
+  row with `requireHost.resolve`. When upstream briefly folded `list_agents` into the
+  `@deepseek-ai/dsh-tool-subagent-control` main entry, the retired `/list-agents` subpath threw
+  `ERR_PACKAGE_PATH_NOT_EXPORTED` out of `apply()`, the preset entry never activated, and the user
+  lost all six roles to gain nothing — not "one tool missing", the whole preset. Rows in
+  `HOST_DECIDED_ROWS` now read the installed `dsh-base/cordis.patch.yml`: the row mounts only while
+  the host still declares it, and disappears silently once the capability has moved upstream
+  (mounting our copy would at best be redundant, at worst register `list_agents` twice). An
+  unreadable base patch keeps the old behaviour rather than assuming the worst.
+- **A row that escapes composition is skipped, not fatal.** If the host still declares the row but
+  its entry no longer resolves (`ERR_PACKAGE_PATH_NOT_EXPORTED` or `MODULE_NOT_FOUND`), only that
+  row is dropped and one warning names what was lost. Every other row keeps failing loudly: a
+  preset that silently loses `tool-fs` looks healthy and is not.
+- **Verified hosts.** `VERIFIED_HOST_VERSIONS` now names 0.2.1-rc.5, 0.2.1-rc.3, 0.2.1-rc.2 and
+  0.2.0-rc.2. The seven installed-host smokes pass on 0.2.1-rc.5, including `model-switch` (route
+  rewrite, effort fallback, `maxTokens` clamp) and `web-host` (all six profile endpoints, bundled
+  save, restart persistence).
+
 ## [0.8.6] — The output cap belongs to the model, not the role
 
 Follow-up to 0.8.5: removes the last role-level guess about a model capability — how many output

@@ -385,7 +385,7 @@ const roleRows = ROLE_TOOLS.map(([roleId, toolId]) => {
  * source. Freezing this copy would pin the host's prose at the moment we copied
  * it (the host already rewrote a sentence of it after 0.1.x), so the mounted
  * definition replaces the section with the host's current text; see
- * hostPlanSection(). This baseline serves hosts whose base patch cannot be read.
+ * hostBasePatch(). This baseline serves hosts whose base patch cannot be read.
  */
 const PLAN_SECTION = `You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
 
@@ -658,17 +658,65 @@ export function parsePlanSection(text) {
 }
 
 /**
- * The host base bundle's own plan-mode section, read from the installed host.
- * @param base - host loader base URL (a file URL, possibly inside app.asar).
- * @returns the section text, or undefined when the base patch cannot be read.
+ * Row ids the host base patch declares, in any nesting depth.
+ *
+ * A line scan, not a YAML parse: this module is shipped without a YAML
+ * dependency, and the host writes one `- id: <name>` per row. The gate below
+ * only needs membership, and an unreadable patch stays fail-open.
+ * @param text - the installed `@deepseek-ai/dsh-base/cordis.patch.yml`.
+ * @returns the declared row ids.
  */
-function hostPlanSection(base) {
+export function patchRowIds(text) {
+  const ids = new Set();
+  for (const line of String(text).split('\n')) {
+    const match = /^\s*-\s+id:\s*['"]?([A-Za-z0-9._-]+)['"]?\s*$/.exec(line);
+    if (match) ids.add(match[1]);
+  }
+  return ids;
+}
+
+/**
+ * The installed host base bundle, read once per mount: the plan-mode section
+ * this preset inherits and the row ids that decide whether a host-decided row
+ * still exists on this build.
+ * @param base - host loader base URL (a file URL, possibly inside app.asar).
+ * @returns { section, ids }, or undefined when the patch cannot be read.
+ */
+function hostBasePatch(base) {
   try {
-    return parsePlanSection(readFileSync(createRequire(base).resolve('@deepseek-ai/dsh-base/cordis.patch.yml'), 'utf8'));
+    const text = readFileSync(createRequire(base).resolve('@deepseek-ai/dsh-base/cordis.patch.yml'), 'utf8');
+    return { section: parsePlanSection(text), ids: patchRowIds(text) };
   } catch {
     return undefined;
   }
 }
+
+/**
+ * Rows whose existence the host decides, not this preset.
+ *
+ * `list_agents` was briefly folded into the `@deepseek-ai/dsh-tool-subagent-control`
+ * main entry upstream (rc.3 → rc.4 master window), which removed the
+ * `/list-agents` subpath export. Resolving that row used to throw
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED` out of `apply()`, so the WHOLE preset entry
+ * failed to activate — the user lost six roles to gain one tool (issue #10).
+ *
+ * Two gates, in this order:
+ *   1. the host base patch must still declare `hostRow`. If it does not, the
+ *      capability moved upstream and mounting our copy would at best be
+ *      redundant and at worst register the same tool twice. Drop it silently.
+ *   2. if the row is declared but its package entry will not resolve, skip only
+ *      that row and say so once. Any other row keeps failing loudly: a preset
+ *      that silently loses `tool-fs` looks healthy and is not.
+ *
+ * An unreadable base patch keeps the old behaviour (mount the row): a missing
+ * read is not evidence that the host dropped the capability.
+ */
+const HOST_DECIDED_ROWS = new Map([
+  ['tool-subagent-list-agents', { hostRow: 'tool-subagent-list-agents', capability: 'the list_agents tool' }],
+]);
+
+/** Resolution failures that mean "this host no longer ships that entry". */
+const MISSING_ENTRY_CODES = new Set(['ERR_PACKAGE_PATH_NOT_EXPORTED', 'MODULE_NOT_FOUND']);
 
 /** Replace the plan-mode section with the host's own text, when it is readable. */
 function withHostPlanSection(rows, section) {
@@ -681,20 +729,55 @@ function withHostPlanSection(rows, section) {
   });
 }
 
-/** Pin native rows to the host graph, not the external profile directory. */
+/**
+ * Pin native rows to the host graph, not the external profile directory.
+ *
+ * A row the host no longer ships is dropped instead of taking the whole entry
+ * down with it (see HOST_DECIDED_ROWS): issue #10 was one retired subpath
+ * export unmounting all six roles.
+ */
 export function resolvedDefinition(ctx) {
   const base = ctx.loader?.config?.bareModuleBaseUrl ?? hostBaseUrl() ?? ctx.loader?.ctx?.baseUrl;
   if (!base) return definition;
   const requireHost = createRequire(base);
-  const resolveRows = rows => rows.map(row => ({
-    ...row,
-    ...(row.name?.startsWith('@deepseek-ai/') ? { name: pathToFileURL(requireHost.resolve(row.name)).href } : {}),
-    ...(row.group && Array.isArray(row.config) ? { config: resolveRows(row.config) } : {}),
-  }));
-  const section = hostPlanSection(base);
+  const host = hostBasePatch(base);
+  const section = host?.section;
   if (section === undefined) {
     ctx.logger?.warn?.('oh-my-dsh-slim: the host base patch carries no readable plan-mode section; mounting the preset baseline text');
   }
+  const skipped = new Set();
+  const resolveRows = (rows) => {
+    const out = [];
+    for (const row of rows) {
+      const decided = HOST_DECIDED_ROWS.get(row.id);
+      // Gate 1: the host's own composition no longer declares this row, so the
+      // capability now lives somewhere else (a main entry). Nothing to compose.
+      if (decided && host !== undefined && !host.ids.has(decided.hostRow)) continue;
+      let name = row.name;
+      if (name?.startsWith('@deepseek-ai/')) {
+        try {
+          name = pathToFileURL(requireHost.resolve(name)).href;
+        } catch (error) {
+          // Gate 2: a host-decided row whose entry vanished between releases.
+          // Every other row keeps failing loudly — a preset that silently loses
+          // a tool row looks healthy and is not.
+          if (!decided || !MISSING_ENTRY_CODES.has(error?.code)) throw error;
+          if (!skipped.has(row.id)) {
+            skipped.add(row.id);
+            ctx.logger?.warn?.('oh-my-dsh-slim: host row "%s" is unavailable on this DSH build (%s); skipping %s and mounting the rest of the preset',
+              row.id, error.code, decided.capability);
+          }
+          continue;
+        }
+      }
+      out.push({
+        ...row,
+        ...(name === row.name ? {} : { name }),
+        ...(row.group && Array.isArray(row.config) ? { config: resolveRows(row.config) } : {}),
+      });
+    }
+    return out;
+  };
   return { ...definition, plugins: withHostPlanSection(resolveRows(plugins), section) };
 }
 

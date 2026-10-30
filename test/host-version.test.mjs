@@ -19,7 +19,7 @@ test('both manifests declare the bounded upgrade policy for engines and all eigh
   assert.equal(MIN_HOST_VERSION, '0.2.0-rc.2');
   assert.equal(MAX_HOST_VERSION_EXCLUSIVE, '0.3.0-0');
   assert.deepEqual(ADMITTED_PRERELEASE_CORES, ['0.2.0', '0.2.1']);
-  assert.deepEqual(VERIFIED_HOST_VERSIONS, ['0.2.1-rc.2', '0.2.0-rc.2']);
+  assert.deepEqual(VERIFIED_HOST_VERSIONS, ['0.2.1-rc.5', '0.2.1-rc.3', '0.2.1-rc.2', '0.2.0-rc.2']);
   for (const file of ['../package.json', '../npm-package/package.json']) {
     const manifest = JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8'));
     assert.equal(manifest.engines.dsh, range);
