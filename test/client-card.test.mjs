@@ -576,6 +576,19 @@ console.log('\n[ProfileSelect sentinel]');
   check(options[0]?.children?.[0] === '极简角色委派 · newSessionDefault', 'default-for-new-sessions marker rendered on the bundled option');
   check(options[1]?.props?.disabled === true, 'separator option is disabled (visual divider)');
   check(options[2]?.children?.[0] === '+ newProfile（newProfileHint）' && element.props.value === 'oh-my-dsh-slim', 'sentinel label carries the editable hint; select shows the current profile');
+  check(element.props.style.background === 'var(--dsw-alias-bg-layer-3)',
+    'the profile select paints an opaque surface (the native popup inherits it — issue #12)');
+}
+
+console.log('\n[select popup surface (issue #12)]');
+{
+  // Windows/Linux Blink draws the <select> popup itself and paints it with the
+  // control's own background-color; `transparent` composited the option list
+  // onto white while the option text stayed light, so entries only appeared
+  // under the pointer's highlight. macOS uses the AppKit menu and never showed
+  // it, which is why the desktop app could not reproduce the report.
+  check(!/background:\s*'transparent'/.test(source),
+    'no control paints `transparent` behind a native popup');
 }
 
 console.log('\n[default action + initial selection]');
@@ -771,6 +784,8 @@ console.log('\n[model inherit (issue #11)]');
 
   const empty = selectOf({ provider: undefined, model: undefined, onChange: () => {} });
   check(empty.props.value === '', 'an unconfigured role selects the inherit option');
+  check(empty.props.style.background === 'var(--dsw-alias-bg-layer-3)',
+    'the model select paints an opaque surface (the native popup inherits it — issue #12)');
   check(inheritOption(empty)?.children?.includes('modelInherit') === true,
     'the inherit option is always present and labelled (no more "no models found" as the value)');
 
@@ -1098,7 +1113,22 @@ console.log('\n[rc.2 contract + baseline preservation]');
       .replaceAll(derivedTextAdvanced, '')
       .replaceAll('buildDraft(effective, effective?.advanced, baseline ?? config)', 'buildDraft(effective, effective?.advanced)')
       .replaceAll('buildDraft(editEffective, editEffective?.advanced, base)', 'buildDraft(editEffective, editEffective?.advanced)')
-      .replaceAll('buildDraft(base, base?.advanced, base)', 'buildDraft(base, base?.advanced)');
+      .replaceAll('buildDraft(base, base?.advanced, base)', 'buildDraft(base, base?.advanced)')
+      // 0.8.8 (issue #12): the shared control style paints the card surface
+      // instead of `transparent`, because Windows/Linux composites the native
+      // <select> popup over the control's own background-color. The closed
+      // control sits on that same surface, so nothing visible changed.
+      .replaceAll([
+        "    // A native <select> hands its own background-color to the popup, and",
+        "    // Windows/Linux Blink draws that popup itself — macOS uses the AppKit menu",
+        "    // and ignores CSS, which is why the desktop app never showed the report.",
+        "    // `transparent` composited the option list onto white while the option text",
+        "    // stayed light: a white-on-white menu whose entries only surfaced under the",
+        "    // pointer's highlight (issue #12). Painting the card surface token keeps a",
+        "    // closed control visually unchanged and gives the popup a real backdrop.",
+        '',
+      ].join('\n'), '')
+      .replaceAll("color: color.text, background: 'var(--dsw-alias-bg-layer-3)'", "color: color.text, background: 'transparent'");
   };
   check(normalize(helperRegion(source)) === normalize(helperRegion(legacy)), 'historical helpers and complete card behavior are preserved apart from the rc.2 revision argument and the icon-name adaptation');
   for (const [manifestPath, expectedClient] of [['package.json', './npm-package/client/client.js'], ['npm-package/package.json', './client/client.js']]) {

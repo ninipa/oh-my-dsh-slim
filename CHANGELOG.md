@@ -4,6 +4,28 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.8] — The native dropdown paints its own surface
+
+Windows/Linux report [#12](https://github.com/ninipa/oh-my-dsh-slim/issues/12): the settings card
+rendered as a blank white page and its text only appeared while the pointer was over it. The theme
+was fine; the `<select>` popup was not.
+
+- **Root cause is the native popup, not a theme or host change.** On Windows and Linux, Blink draws
+  the option list itself and paints it with the control's own `background-color`. The shared control
+  style was `transparent`, so the list composited onto the white default canvas while the option text
+  kept `--dsw-alias-label-primary` (near-white under the dark palette) — a white-on-white menu whose
+  entries surfaced only under the pointer's highlight. macOS renders the same `<select>` through the
+  AppKit menu, where CSS colours do not participate, which is why the desktop app could not reproduce
+  it. No host difference explains it either: rc.3 → rc.5 differs only in CSS-module hashes across
+  `dsh-client-ui-theme`, `dsh-client-ui-settings-shell` and `dsh-client-ui-settings-plugins`.
+- **The controls now paint `var(--dsw-alias-bg-layer-3)`.** The card already sits on that token, so a
+  closed select, input or profile picker looks exactly as before, while the popup inherits an opaque
+  backdrop. `--dsw-specific-menu` is deliberately not used: it is semi-transparent in dark mode and
+  Chromium still blends it with white (crbug 565453079).
+- **Regression guard.** `test/client-card.test.mjs` asserts both the model and the profile select
+  paint that surface, and that no control in the bundle hands `background: 'transparent'` to a native
+  popup.
+
 ## [0.8.7] — A retired host row costs one tool, not the preset
 
 DSH 0.2.1-rc.5 compatibility check, plus the failure mode behind

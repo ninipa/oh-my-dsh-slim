@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
     // no build step or package metadata, so this is a literal; T0 and
     // client-card.test.mjs compare it with package.json so a release bump
     // cannot silently leave the header stale.
-    const VERSION = '0.8.7';
+    const VERSION = '0.8.8';
     const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
@@ -1004,8 +1004,15 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // A native <select> hands its own background-color to the popup, and
+    // Windows/Linux Blink draws that popup itself — macOS uses the AppKit menu
+    // and ignores CSS, which is why the desktop app never showed the report.
+    // `transparent` composited the option list onto white while the option text
+    // stayed light: a white-on-white menu whose entries only surfaced under the
+    // pointer's highlight (issue #12). Painting the card surface token keeps a
+    // closed control visually unchanged and gives the popup a real backdrop.
     const controlStyle = {
-      height: 30, fontSize: 13, color: color.text, background: 'transparent',
+      height: 30, fontSize: 13, color: color.text, background: 'var(--dsw-alias-bg-layer-3)',
       border: `1px solid ${color.border}`, borderRadius: 8, padding: '0 8px', minWidth: 0, width: '100%',
     };
 

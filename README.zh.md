@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.7 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.8 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
@@ -18,6 +18,13 @@
 
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
+
+> **0.8.8（2026-11-01）：原生下拉自己带上底色。** Windows/Linux 上设置卡曾整片纯白、文字要鼠标划过
+> 才出现（[#12](https://github.com/ninipa/oh-my-dsh-slim/issues/12)）。这两个平台的 Blink 自己绘制
+> `<select>` 弹层，并直接拿控件自身的 `background-color` 当底色；共享控件样式原来是 `transparent`，
+> 弹层就合成到白底上，而文字仍是 `--dsw-alias-label-primary`（深色模式下近白）——白底白字。
+> 现在控件统一画 `var(--dsw-alias-bg-layer-3)`（卡片本来就用的表面色），收起时外观不变，弹层有真正
+> 的底色。macOS 不受影响：它走 AppKit 原生菜单，CSS 颜色不参与绘制。
 
 > **0.8.7（2026-10-30）：一行被上游退休，代价只该是一个工具，不是整套预设。** 已验证 DSH
 > **0.2.1-rc.5**：它的思考强度接口与 rc.3 逐字节相同（rc.4 只修了 ACP 模式下诊断输出混入 stdout，
@@ -110,7 +117,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.8.7
+oh-my-dsh-slim@0.8.8
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -120,7 +127,7 @@ oh-my-dsh-slim@0.8.7
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.7
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.8
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：

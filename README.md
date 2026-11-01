@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.7 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.8 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -23,6 +23,16 @@ directory to copy.
 
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
+
+> **0.8.8 (2026-11-01): the native dropdown paints its own surface.** On Windows/Linux the settings
+> card looked blank white and its text only appeared under the pointer
+> ([#12](https://github.com/ninipa/oh-my-dsh-slim/issues/12)). Blink on those platforms draws the
+> `<select>` popup itself and paints it with the control's own `background-color`; the shared control
+> style used `transparent`, so the option list composited onto white while its text stayed
+> `--dsw-alias-label-primary` (near-white in dark mode). Controls now paint
+> `var(--dsw-alias-bg-layer-3)` — the surface the card already sits on — which leaves a closed control
+> visually unchanged and gives the popup an opaque backdrop. macOS was never affected: it uses the
+> AppKit menu, where CSS colours do not participate.
 
 > **0.8.7 (2026-10-30): a retired host row costs one tool, not the preset.** DSH **0.2.1-rc.5**
 > verified; its thinking-effort surface is byte-identical to rc.3 (rc.4 fixed diagnostics leaking
@@ -145,7 +155,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.7
+oh-my-dsh-slim@0.8.8
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -155,7 +165,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.7
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.8
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules
