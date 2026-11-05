@@ -4,6 +4,41 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.9] — DSH 0.2.2-rc.1: tools leave the assembly waterfall
+
+[#13](https://github.com/ninipa/oh-my-dsh-slim/issues/13): after upgrading to DSH 0.2.2-rc.1 all
+three preset entries were rejected by the host gate. The gate refusal was the declared policy — a
+new patch core's prereleases need a release that admits them — but the host also changed the prompt
+tool contract, so admitting it was not a one-line change.
+
+- **0.2.2 admits its prereleases.** `ADMITTED_PRERELEASE_CORES` gains `0.2.2`,
+  `VERIFIED_HOST_VERSIONS` gains `0.2.2-rc.1`, and 0.2.3 prereleases stay refused. The effort
+  vocabulary and every exported symbol this preset consumes (`dsh-llm`, `dsh-subagent`,
+  `dsh-tool-subagent`, `dsh-agent-preset-registry`, `dsh-session`, `dsh-settings`, `dsh-persona`)
+  are unchanged from rc.5.
+- **The step tool set is now resolved before assembly.** `dsh-agent-loop` calls `tools.resolve()`
+  before `systemPrompt.assemble()` and the waterfall payload carries only `sections`, `contexts` and
+  `variables`; tool declarations stay provider-owned and are attached after the waterfall. The old
+  MCP path (wait inside `system-prompt/assemble`, then push fresh `mcp__*` schemas into
+  `assembly.tools`) therefore threw `TypeError: ... reading 'some'` for every MCP-enabled role and
+  could no longer influence the step at all. `role-mcp` now detects the 0.2.2+ shape and waits for
+  its clients in the serial `agent/created` dispatch instead — same 20 s cap, still failure-open —
+  so registrations land before `tools.resolve()`. Earlier lines keep the assembly-waterfall path.
+- **Renamed child-model-selection sentence.** The stock delegation tool no longer says "Child LLM
+  selection is optional."; it appends "Supply `provider` and `model` together." when the switch is
+  on. The role-description wrapper now preserves either marker instead of pinning one host line.
+- **`tool-fs` gains `applyPatch: false`.** 0.2.2 adds the key to the host row; the schema default is
+  already false, so the preset row keeps omitting it and the host-row audit records the reason as a
+  conditional divergence (only a host that declares the key creates one).
+- **Host-fixture updates.** 0.2.2 fixes the model selection before assembly, so the smoke fixtures
+  give their parent a route; smoke observation reads admitted tools from `context.toolSet` when the
+  waterfall has none; the stock-registration test awaits the now-async stock apply and reads the
+  projection handle returned by `sessionProjections.register()`.
+- **Verification.** T0 plus the 194-test suite and all seven smokes pass on **0.2.2-rc.1 and
+  0.2.1-rc.5** (194/194 on both lines, 7/7 on both lines); the MCP suite covers both assembly
+  shapes, including the 20 s bound and failure-open behavior on the new path. Isolated hosts were
+  installed from the npm tarballs; the desktop profile was not touched by this verification.
+
 ## [0.8.8] — The native dropdown paints its own surface
 
 Windows/Linux report [#12](https://github.com/ninipa/oh-my-dsh-slim/issues/12): the settings card

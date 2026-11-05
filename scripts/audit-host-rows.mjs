@@ -31,6 +31,16 @@ const DIVERGENCES = [
       + 'used only when that read fails. The block-scalar cross-check below proves the inherited '
       + 'text is byte-identical to the host loader\'s own parse.',
   },
+  {
+    id: 'tool-fs',
+    reason: 'the host base sets applyPatch:false from 0.2.2 (a new schema key, default false); '
+      + 'the preset row omits the key because earlier verified lines have no such config. '
+      + 'Both hosts therefore resolve the same effective value: 0.2.2 defaults it to false, '
+      + 'and older lines do not know the tool at all.',
+    // Only a host that declares the key creates the divergence; earlier lines
+    // have nothing to diverge from.
+    when: (hostRow, ownRow) => hostRow.config?.applyPatch !== undefined && ownRow.config?.applyPatch === undefined,
+  },
 ];
 
 /**
@@ -111,7 +121,7 @@ export function auditHostRows({ referenceDir } = {}) {
   const preset = presetRows();
   const baseById = new Map(base.map(row => [row.id, row]));
   const presetById = new Map(preset.map(row => [row.id, row]));
-  const divergenceIds = new Set(DIVERGENCES.map(entry => entry.id));
+  const divergenceById = new Map(DIVERGENCES.map(entry => [entry.id, entry]));
   const absenceIds = new Set(ABSENCES.map(entry => entry.id));
 
   // 1. Shared ids: the preset must not silently re-value a host-owned row.
@@ -123,8 +133,10 @@ export function auditHostRows({ referenceDir } = {}) {
       notes.push(`same    ${id}`);
       continue;
     }
-    if (divergenceIds.has(id)) { summary.known += 1; notes.push(`known   ${id} (listed divergence)`); }
-    else failures.push(`${id}: preset config ${JSON.stringify(own.config ?? null)} differs from host base ${JSON.stringify(hostRow.config ?? null)} — add it to DIVERGENCES with a reason, or adopt the host value`);
+    const divergence = divergenceById.get(id);
+    if (divergence && (divergence.when === undefined || divergence.when(hostRow, own))) {
+      summary.known += 1; notes.push(`known   ${id} (listed divergence)`);
+    } else failures.push(`${id}: preset config ${JSON.stringify(own.config ?? null)} differs from host base ${JSON.stringify(hostRow.config ?? null)} — add it to DIVERGENCES with a reason, or adopt the host value`);
   }
 
   // 2. Rows the host hands to the agent plane in web mode: the base enables
@@ -167,7 +179,12 @@ export function auditHostRows({ referenceDir } = {}) {
   }
   for (const entry of DIVERGENCES) {
     const own = presetById.get(entry.id);
-    if (!own || !baseById.has(entry.id) || sameConfig(baseById.get(entry.id).config, own.config)) {
+    const hostRow = baseById.get(entry.id);
+    if (!own || !hostRow) {
+      continue; // an absent row is the synthetic-fixture case, not stale bookkeeping
+    }
+    if (entry.when !== undefined && !entry.when(hostRow, own)) continue;
+    if (sameConfig(hostRow.config, own.config)) {
       failures.push(`${entry.id}: listed in DIVERGENCES but there is no live divergence — drop the entry`);
     }
   }

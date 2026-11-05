@@ -77,7 +77,9 @@ fs.writeFileSync(CONFIG_PATH, JSON.stringify({ roles: { 'councillor-alpha': { en
         id: context.agent?.id,
         isChild: (context.agent?.session?.ownEvents?.() ?? []).some((event) => event.type === 'subagent/descriptor'),
         text: assembly.sections.map((section) => String(section.text)).join('\n'),
-        tools: assembly.tools.map((tool) => tool.name),
+        // 0.2.2 detaches tool declarations from the assembly waterfall; the
+        // admitted set is carried on the assembly context instead.
+        tools: context.toolSet ? [...context.toolSet.view(context.scope).keys()] : assembly.tools ? assembly.tools.map((tool) => tool.name) : (context.agent?.ctx?.tools?.schemas?.(context.scope) ?? []).map((tool) => tool.name),
       });
       return next();
     });
@@ -99,6 +101,9 @@ fs.writeFileSync(CONFIG_PATH, JSON.stringify({ roles: { 'councillor-alpha': { en
       try {
         const scope = await hostImport('@deepseek-ai/dsh-scope');
         const parent = (await c.agents.create({ sessionId: 'real-role-root-' + randomUUID(), meta: { cwd: process.cwd() } })).agent;
+      // 0.2.2 fixes the model selection before prompt assembly; give the
+      // fixture a route so the child inherits one through the parent header.
+      parent.options = { ...parent.options, provider: 'fixture', model: 'fixture-model' };
         const tool = c.tools.get('subagent_councillor_alpha', scope.scopeOf(parent.ctx));
         assert.ok(tool, 'the production role row registered its tool');
         const result = await tool.execute({ description: 'real role row probe', prompt: 'smoke' }, { agent: parent, signal: new AbortController().signal });

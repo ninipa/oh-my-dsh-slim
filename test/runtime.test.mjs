@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { hostImport } from '../npm-package/preset/bridge.js';
+import { compareSemver } from '../npm-package/lib/host-version.js';
 import { patchedContext, roleIdForAgent, stockConfig, fitFilterToKnown } from '../npm-package/preset/roles.js';
 import { apply as applyRoleRequests } from '../npm-package/preset/subagent-roles.js';
 import { apply as applyEarlyClose } from '../npm-package/preset/early-close-context.js';
@@ -22,6 +23,13 @@ const referenceSkip = packageName => existsSync(referenceFile(packageName)) ? fa
   : `Host integration unavailable at ${referenceFile(packageName)}; set DSH_HOST_REFERENCE_DIR to a host node_modules root containing @deepseek-ai (or provide the extracted dsh-host-reference sibling).`;
 const skipStock = referenceSkip('dsh-tool-subagent');
 const skipCordis = referenceSkip('cordis');
+// 0.2.2 renamed the stock model-selection switch and its wording. The suite
+// runs against every verified host line, so pick the key from the reference.
+const stockHostVersion = (() => {
+  try { return JSON.parse(readFileSync(join(referenceDir, '@deepseek-ai/dsh-tool-subagent/package.json'), 'utf8')).version; } catch { return undefined; }
+})();
+const modelSelectionKey = stockHostVersion !== undefined && compareSemver(stockHostVersion, '0.2.2-rc.1') >= 0
+  ? 'modelSelection' : 'modelSelectionSettings';
 
 test('host import uses the official loader base on CLI without an asar argv', async () => {
   const calls = [];
@@ -122,7 +130,9 @@ for (const scoped of [false, true]) test(`actual stock registration keeps role d
     scope: compositionScope,
     tools: runtime,
     subagents: { getProvider: () => provider, resolveMaxDepth: () => undefined },
-    sessionProjections: { register() {}, stateOf: () => [{ provider: 'p', model: 'm' }] },
+    // 0.2.2 keeps the accepted projection handle from register(); earlier lines
+    // read stateOf from the service. Return the same reader for both shapes.
+    sessionProjections: { register() { return { stateOf: () => [{ provider: 'p', model: 'm' }] }; }, stateOf: () => [{ provider: 'p', model: 'm' }] },
     systemPrompt: { section() {}, context() {}, getSectionOrder: () => 1, getContextOrder: () => 1 },
     logger: { info() {}, warn() {} },
     on: (event, fn) => { callbacks.set(event, fn); },
@@ -144,8 +154,10 @@ for (const scoped of [false, true]) test(`actual stock registration keeps role d
   ctx.subagents.startContinuable = async spec => { requests.push(spec); return { childId }; };
   const foreground = [];
   ctx.subagents.start = async (providerName, request) => { foreground.push({ providerName, request }); return { id: 'foreground-test', result: Promise.resolve({ stopReason: 'completed', output: [] }), dispose() {} }; };
-  stockApply()(patchedContext(ctx, seen, { roleId: 'oracle', toolName: 'subagent_explorer', description: 'Readonly explorer', stock: { provider: 'in-process', backgroundMode: 'continuable' } }, undefined, undefined, ctx => ctx?.scope), {
-    provider: 'in-process', toolName: 'subagent_explorer', backgroundMode: 'continuable', maxDepth: 'provider-managed', modelSelectionSettings: scoped,
+  // 0.2.2 awaits sessionProjections.register before the first registration, so
+  // the stock apply body must settle before the interception is observable.
+  await stockApply()(patchedContext(ctx, seen, { roleId: 'oracle', toolName: 'subagent_explorer', description: 'Readonly explorer', stock: { provider: 'in-process', backgroundMode: 'continuable' } }, undefined, undefined, ctx => ctx?.scope), {
+    provider: 'in-process', toolName: 'subagent_explorer', backgroundMode: 'continuable', maxDepth: 'provider-managed', [modelSelectionKey]: scoped,
     agentOptions: childOptions,
   });
   const tool = tools.find(value => value.name === 'subagent_explorer');
@@ -173,10 +185,17 @@ for (const scoped of [false, true]) test(`actual stock registration keeps role d
     assert.equal(foreground[0].request.parent, parent);
   }
   if (scoped) {
-    assert.match(tool.description, /Child LLM selection/);
-    callbacks.get('agent/disposed')({ agent: candidate });
-    callbacks.get('agent/created')({ agent: candidate });
-    assert.equal(tools.filter(value => value.name === 'subagent_explorer').length, 2);
+    assert.match(tool.description, modelSelectionKey === 'modelSelection'
+      ? /Supply `provider` and `model` together/
+      : /Child LLM selection/);
+    // 0.2.2 registers the delegation tool once through ctx.effect and lets the
+    // tool framework scope it per agent; the per-agent re-registration
+    // listeners this branch used to exercise no longer exist.
+    if (modelSelectionKey === 'modelSelectionSettings') {
+      callbacks.get('agent/disposed')({ agent: candidate });
+      callbacks.get('agent/created')({ agent: candidate });
+      assert.equal(tools.filter(value => value.name === 'subagent_explorer').length, 2);
+    }
   }
 });
 

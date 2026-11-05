@@ -1,17 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { apply, inject, serverConfig, isContinuableAgent, MCP_WAIT_TIMEOUT_MS } from '../npm-package/preset/role-mcp.js';
+import { pathToFileURL } from 'node:url';
+import { apply, inject, serverConfig, isContinuableAgent, MCP_WAIT_TIMEOUT_MS, waitsBeforeStep } from '../npm-package/preset/role-mcp.js';
 const deferred = () => { let resolve; const promise = new Promise((yes) => { resolve = yes; }); return { promise, resolve }; };
 const flush = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
 
-function fixture(t, { delay, fail } = {}) {
+function fixture(t, { delay, fail, hostVersion } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'omds-mcp-'));
   const previous = process.env.OH_MY_DSH_SLIM_CONFIG;
   const path = join(dir, 'config.json');
   process.env.OH_MY_DSH_SLIM_CONFIG = path;
+  // A fixture host manifest lets detectHostDshVersion pick the 0.2.2+ path,
+  // where the step tool set is resolved before prompt assembly.
+  let bareModuleBaseUrl = 'file:///mock/index.js';
+  let hostDir = dir;
+  if (hostVersion !== undefined) {
+    hostDir = join(dir, 'host');
+    mkdirSync(join(hostDir, 'node_modules', '@deepseek-ai', 'dsh'), { recursive: true });
+    writeFileSync(join(hostDir, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: hostVersion }));
+    bareModuleBaseUrl = pathToFileURL(join(hostDir, 'entry.js')).href;
+  }
   const writeConfig = (command = 'not-executed') => writeFileSync(path, JSON.stringify({
     preset: 'legacy', mcpServers: {
       context7: { transport: 'streamable-http', url: 'https://not-contacted.invalid', headers: { token: 'test' } },
@@ -28,7 +39,7 @@ function fixture(t, { delay, fail } = {}) {
   const mcp = { async apply() {} };
   const ctx = {
     key: composition,
-    loader: { config: { bareModuleBaseUrl: 'file:///mock/index.js' }, internal: { async import(id) {
+    loader: { config: { bareModuleBaseUrl }, internal: { async import(id) {
       if (id === '@deepseek-ai/dsh-scope') return { scopeOf: (c) => c.key, scopeChainOf: (k) => [k, k?.parent] };
       assert.equal(id, '@deepseek-ai/dsh-mcp-client'); return mcp;
     } } },
@@ -36,6 +47,7 @@ function fixture(t, { delay, fail } = {}) {
     effect(setup) { cleanup.push(setup()); },
     on(event, fn) { handlers.set(event, fn); },
   };
+  const modern = waitsBeforeStep(ctx);
   function agent(role = 'librarian', mode = 'continuable', parent = composition) {
     const listeners = new Map(), visible = new Set();
     const a = { id: 'agent-' + agents.length, options: {}, session: { events: role ? [{ type: 'subagent/descriptor', data: { mode, persona: 'oh-my-dsh-slim-role:' + role + '.' } }] : [] } };
@@ -59,10 +71,13 @@ function fixture(t, { delay, fail } = {}) {
       },
     };
     a.assemble = async () => {
-      const assembly = { tools: a.ctx.tools.schemas(a) };
+      const tools = a.ctx.tools.schemas(a);
+      // 0.2.2 resolves the admitted tools before assembly and keeps them out of
+      // the waterfall payload; earlier lines build them inside the waterfall.
+      const assembly = modern ? { sections: [], contexts: [], variables: {} } : { tools };
       const fn = listeners.get('system-prompt/assemble');
       if (fn) await fn(assembly, { agent: a }, async () => assembly);
-      return assembly;
+      return modern ? { ...assembly, tools } : assembly;
     };
     a.visible = visible; a.listeners = listeners; agents.push(a); return a;
   }
@@ -172,5 +187,39 @@ test('leaving composition unregisters exact Agent clients', async (t) => {
   await f.emit('tools/change'); await flush();
   assert.equal(child.visible.size, 0);
   assert.equal(child.listeners.size, 0);
+  await f.dispose();
+});
+
+test('0.2.2 host waits at agent/created and never touches the assembly payload', async (t) => {
+  const f = fixture(t, { hostVersion: '0.2.2-rc.1' });
+  await apply(f.ctx);
+  const child = f.agent();
+  // The serial creation listener is the pre-step hook: when it settles, the
+  // native MCP tools are already registered in the Agent's tool runtime.
+  await f.emit('agent/created', { agent: child });
+  assert.deepEqual([...child.visible], ['mcp__context7__lookup', 'mcp__gh_grep__lookup']);
+  assert.equal(child.listeners.size, 0, 'no assembly-waterfall listener on the provider-owned host');
+  const assembly = await child.assemble();
+  assert.deepEqual(assembly.tools.map((x) => x.name), ['mcp__context7__lookup', 'mcp__gh_grep__lookup']);
+  assert.equal(f.warnings.length, 0);
+  await f.dispose();
+});
+
+test('0.2.2 creation wait keeps the 20-second bound and stays failure-open', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const delay = deferred(), f = fixture(t, { hostVersion: '0.2.2-rc.1', delay });
+  await apply(f.ctx);
+  const child = f.agent();
+  let created = false;
+  const creation = Promise.resolve(f.emit('agent/created', { agent: child })).then(() => { created = true; });
+  await flush();
+  t.mock.timers.tick(19999); await flush();
+  assert.equal(created, false, 'creation still waits one millisecond before the cap');
+  t.mock.timers.tick(1); await flush();
+  assert.equal(created, true, 'the 20-second cap releases creation');
+  delay.resolve(); await flush();
+  await creation;
+  assert.deepEqual((await child.assemble()).tools.map((x) => x.name),
+    ['mcp__context7__lookup', 'mcp__gh_grep__lookup'], 'late registration reaches later steps');
   await f.dispose();
 });

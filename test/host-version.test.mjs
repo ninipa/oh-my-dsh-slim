@@ -12,14 +12,14 @@ import {
 } from '../npm-package/lib/host-version.js';
 
 const range = '>=0.2.0-rc.2 <0.3.0-0';
-const admitted = ['0.2.0-rc.2', '0.2.0-rc.3', '0.2.0-rc.10', '0.2.0', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1', '0.2.99'];
-const rejected = ['0.1.2-rc.1', '0.1.5-rc.2', '0.1.5', '0.1.6', '0.2.0-alpha.9', '0.2.0-rc.1', '0.2.2-rc.1', '0.3.0-0', '0.3.0-rc.1', '0.3.0', '1.0.0'];
+const admitted = ['0.2.0-rc.2', '0.2.0-rc.3', '0.2.0-rc.10', '0.2.0', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1', '0.2.2-rc.1', '0.2.2', '0.2.99'];
+const rejected = ['0.1.2-rc.1', '0.1.5-rc.2', '0.1.5', '0.1.6', '0.2.0-alpha.9', '0.2.0-rc.1', '0.2.3-rc.1', '0.3.0-0', '0.3.0-rc.1', '0.3.0', '1.0.0'];
 
 test('both manifests declare the bounded upgrade policy for engines and all eight peers', () => {
   assert.equal(MIN_HOST_VERSION, '0.2.0-rc.2');
   assert.equal(MAX_HOST_VERSION_EXCLUSIVE, '0.3.0-0');
-  assert.deepEqual(ADMITTED_PRERELEASE_CORES, ['0.2.0', '0.2.1']);
-  assert.deepEqual(VERIFIED_HOST_VERSIONS, ['0.2.1-rc.5', '0.2.1-rc.3', '0.2.1-rc.2', '0.2.0-rc.2']);
+  assert.deepEqual(ADMITTED_PRERELEASE_CORES, ['0.2.0', '0.2.1', '0.2.2']);
+  assert.deepEqual(VERIFIED_HOST_VERSIONS, ['0.2.2-rc.1', '0.2.1-rc.5', '0.2.1-rc.3', '0.2.1-rc.2', '0.2.0-rc.2']);
   for (const file of ['../package.json', '../npm-package/package.json']) {
     const manifest = JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8'));
     assert.equal(manifest.engines.dsh, range);
@@ -62,7 +62,9 @@ test('npm semver differs from the explicit policy only on allow-listed cores', (
   assert.equal(semver.satisfies('0.2.1-rc.2', range), false);
   assert.equal(hostVerdict('0.2.1-rc.2').status, 'ok');
   assert.equal(semver.satisfies('0.2.2-rc.1', range), false);
-  assert.equal(hostVerdict('0.2.2-rc.1').status, 'unsupported');
+  assert.equal(hostVerdict('0.2.2-rc.1').status, 'ok');
+  assert.equal(semver.satisfies('0.2.3-rc.1', range), false);
+  assert.equal(hostVerdict('0.2.3-rc.1').status, 'unsupported');
 });
 
 function fixture(version) {

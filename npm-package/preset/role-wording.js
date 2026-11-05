@@ -65,8 +65,14 @@ export function patchRoleTool(tool, options) {
   if (parameters.prompt) parameters.prompt = { ...parameters.prompt, description: providerWording(options.inheritsParentContext === true).promptDescription };
   if (parameters.run_in_background) parameters.run_in_background = { ...parameters.run_in_background, description: schedulingDescription((options.backgroundMode ?? 'one-shot') === 'continuable') };
   // New rc.2 route fields remain native; retain their corresponding description
-  // only when those fields actually exist on this tool.
-  const routeStart = tool.description?.indexOf(' Child LLM selection is optional.');
+  // only when those fields actually exist on this tool. 0.2.2 renamed the
+  // stock sentence, so accept either marker rather than pinning one host line.
+  const routeMarkers = [' Child LLM selection is optional.', ' Supply `provider` and `model` together.'];
+  let routeStart = -1;
+  for (const marker of routeMarkers) {
+    const at = tool.description?.indexOf(marker) ?? -1;
+    if (at >= 0 && (routeStart < 0 || at < routeStart)) routeStart = at;
+  }
   const routeNote = parameters.provider && parameters.model && routeStart >= 0 ? tool.description.slice(routeStart) : '';
   const patched = { ...tool, parameters, description: roleDescription(shaped) + routeNote };
   const { foregroundMcpNote } = lifecycle(shaped);

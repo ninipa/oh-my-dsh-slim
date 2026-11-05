@@ -38,7 +38,7 @@ export const MAX_HOST_VERSION_EXCLUSIVE = '0.3.0-0';
  * NOTE: the host's own manifest gate uses `includePrerelease: true`; this list
  * is OUR runtime policy and the two must be reasoned about separately.
  */
-export const ADMITTED_PRERELEASE_CORES = ['0.2.0', '0.2.1'];
+export const ADMITTED_PRERELEASE_CORES = ['0.2.0', '0.2.1', '0.2.2'];
 
 /**
  * Stable core version of the declarative preset line. Admission uses the
@@ -47,7 +47,7 @@ export const ADMITTED_PRERELEASE_CORES = ['0.2.0', '0.2.1'];
 export const DECLARATIVE_PRESET_VERSION = '0.2.0';
 
 /** Exact hosts verified with this line, newest first. */
-export const VERIFIED_HOST_VERSIONS = ['0.2.1-rc.5', '0.2.1-rc.3', '0.2.1-rc.2', '0.2.0-rc.2'];
+export const VERIFIED_HOST_VERSIONS = ['0.2.2-rc.1', '0.2.1-rc.5', '0.2.1-rc.3', '0.2.1-rc.2', '0.2.0-rc.2'];
 
 /** Highest 0.1.x core version verified with the directory-preset model. */
 export const LAST_DIRECTORY_PRESET_VERSION = '0.1.5-rc.2';

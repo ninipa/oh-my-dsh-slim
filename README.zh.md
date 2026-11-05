@@ -1,15 +1,15 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.8 · DSH 0.2 兼容版本线**
+**oh-my-dsh-slim · 0.8.9 · DSH 0.2 兼容版本线**
 
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）中适配
 [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim) 的角色委派体系：
 **orchestrator + 5 个启用的专职角色**，交付为从插件组合包挂载的**声明式原生 agent 预设**，
 不是独立应用，也不需要手工复制预设目录。
 
-> **宿主范围：`>=0.2.0-rc.2 <0.3.0-0`；实测宿主：DSH 0.2.0-rc.2、0.2.1-rc.2、0.2.1-rc.3 与 0.2.1-rc.5。**
-> 门禁是 per-core 白名单：0.2.0 与 0.2.1 的预发布/稳定/后续补丁放行；更高 minor 或更高补丁的
-> 预发布 core（例如 `0.2.2-rc.1`）会被拒绝，直到有版本明确放行。
+> **宿主范围：`>=0.2.0-rc.2 <0.3.0-0`；实测宿主：DSH 0.2.0-rc.2、0.2.1-rc.2、0.2.1-rc.3、0.2.1-rc.5 与 0.2.2-rc.1。**
+> 门禁是 per-core 白名单：0.2.0、0.2.1 与 0.2.2 的预发布/稳定/后续补丁放行；更高 minor 或更高补丁的
+> 预发布 core（例如 `0.2.3-rc.1`）会被拒绝，直到有版本明确放行。
 > 升级策略：所需 API 不变时维持 0.2 版本线兼容，验证新宿主后才宣称实测支持；0.3 版本线另行审查。
 > **DSH ≤0.1.5 请继续使用 `oh-my-dsh-slim@0.5.3`。** 中间版本需要升级 DSH。
 > 0.6.1 已通过 101 项自动测试、六项隔离已安装宿主基础组合 smoke，以及 web 组合传输层五项哨兵
@@ -18,6 +18,13 @@
 
 Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署名。
 见 [LICENSE](./LICENSE)。English version: [README.md](./README.md)。
+
+> **0.8.9（2026-11-05）：适配 DSH 0.2.2-rc.1。** npm `next` 宿主线在 prompt 组装**之前**就解析本步
+> 的工具集，且不再把 `tools` 暴露给 `system-prompt/assemble` 瀑布。版本白名单放行 0.2.2 core；
+> 带 MCP 的角色改为在串行的 `agent/created` 派发里等待客户端就绪（仍是 20 秒上限、失败放行），
+> 不再改写组装快照；角色描述包装保留宿主改名后的子模型选择文案；`tool-fs` 的新默认
+> `applyPatch: false` 登记为有条件偏离。已在 0.2.2-rc.1 与 0.2.1-rc.5 两线验证：T0、194 项测试、
+> 7 个 smoke 全绿。
 
 > **0.8.8（2026-11-01）：原生下拉自己带上底色。** Windows/Linux 上设置卡曾整片纯白、文字要鼠标划过
 > 才出现（[#12](https://github.com/ninipa/oh-my-dsh-slim/issues/12)）。这两个平台的 Blink 自己绘制
@@ -117,7 +124,7 @@ Persona 适配自 oh-my-opencode-slim（MIT © 2025 alvinunreal），保留署�
 桌面 App 的 `desktop` profile **只能通过桌面插件管理器管理**，不能使用 `dsh plugin --profile desktop`。在管理器的安装入口填写固定版本：
 
 ```text
-oh-my-dsh-slim@0.8.8
+oh-my-dsh-slim@0.8.9
 ```
 
 请按发布说明中的明确版本安装，不要依赖浮动 tag，也不要替换为持续变动的开发分支。
@@ -127,7 +134,7 @@ oh-my-dsh-slim@0.8.8
 以下 CLI 命令仅适用于非桌面管理的 profile：
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.8
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.9
 ```
 
 本地 checkout 也可——安装仓库根目录即可，其 export map 提供与发布包相同的模块：

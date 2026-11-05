@@ -77,7 +77,9 @@ const log = (...args) => console.log('[role-smoke]', ...args);
         id: context.agent?.id,
         isChild: (context.agent?.session?.ownEvents?.() ?? []).some((event) => event.type === 'subagent/descriptor'),
         text: assembly.sections.map((section) => String(section.text)).join('\n'),
-        tools: assembly.tools.map((tool) => tool.name),
+        // 0.2.2 detaches tool declarations from the assembly waterfall; the
+        // admitted set is carried on the assembly context instead.
+        tools: context.toolSet ? [...context.toolSet.view(context.scope).keys()] : assembly.tools ? assembly.tools.map((tool) => tool.name) : (context.agent?.ctx?.tools?.schemas?.(context.scope) ?? []).map((tool) => tool.name),
       });
       return next();
     });
@@ -93,6 +95,9 @@ const log = (...args) => console.log('[role-smoke]', ...args);
       try {
       log('injected');
       const parent = (await c.agents.create({ sessionId: 'role-smoke-root-' + randomUUID(), meta: { cwd: process.cwd() } })).agent;
+      // 0.2.2 fixes the model selection before prompt assembly; give the
+      // fixture a route so the child inherits one through the parent header.
+      parent.options = { ...parent.options, provider: 'fixture', model: 'fixture-model' };
       await c.systemPrompt.assemble({ agent: parent, scope: parent });
       const receipt = await (typeof c.subagents.startActivation === 'function'
         ? c.subagents.startActivation({ provider: 'spawn', label: 'oracle · smoke', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal, delivery: 'parent' })

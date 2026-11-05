@@ -68,7 +68,9 @@ fs.writeFileSync(CONFIG_PATH, JSON.stringify({ roles: { 'councillor-alpha': { en
     ctx.on('system-prompt/assemble', async (assembly, context, next) => {
       assemblies.push({
         id: context.agent?.id,
-        tools: assembly.tools.map((tool) => tool.name),
+        // 0.2.2 detaches tool declarations from the assembly waterfall; the
+        // admitted set is carried on the assembly context instead.
+        tools: context.toolSet ? [...context.toolSet.view(context.scope).keys()] : assembly.tools ? assembly.tools.map((tool) => tool.name) : (context.agent?.ctx?.tools?.schemas?.(context.scope) ?? []).map((tool) => tool.name),
         text: assembly.sections.map((section) => String(section.text)).join('\n'),
       });
       return next();
@@ -85,6 +87,9 @@ fs.writeFileSync(CONFIG_PATH, JSON.stringify({ roles: { 'councillor-alpha': { en
       ctx.inject(['agents', 'subagents', 'systemPrompt', 'loader'], async (c) => {
         try {
           const parent = (await c.agents.create({ sessionId: 'council-resume-root-' + randomUUID(), meta: { cwd: process.cwd() } })).agent;
+      // 0.2.2 fixes the model selection before prompt assembly; give the
+      // fixture a route so the child inherits one through the parent header.
+      parent.options = { ...parent.options, provider: 'fixture', model: 'fixture-model' };
           const receipt = await (typeof c.subagents.startActivation === 'function'
             ? c.subagents.startActivation({ provider: 'spawn', label: 'councillor-alpha · resume', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal, delivery: 'parent' })
             : c.subagents.startContinuable({ provider: 'spawn', label: 'councillor-alpha · resume', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal }));
@@ -110,7 +115,9 @@ fs.writeFileSync(CONFIG_PATH, JSON.stringify({ roles: { 'councillor-alpha': { en
     ctx.on('system-prompt/assemble', async (assembly, context, next) => {
       resumedAssemblies.push({
         id: context.agent?.id,
-        tools: assembly.tools.map((tool) => tool.name),
+        // 0.2.2 detaches tool declarations from the assembly waterfall; the
+        // admitted set is carried on the assembly context instead.
+        tools: context.toolSet ? [...context.toolSet.view(context.scope).keys()] : assembly.tools ? assembly.tools.map((tool) => tool.name) : (context.agent?.ctx?.tools?.schemas?.(context.scope) ?? []).map((tool) => tool.name),
         text: assembly.sections.map((section) => String(section.text)).join('\n'),
       });
       return next();

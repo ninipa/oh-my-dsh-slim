@@ -88,7 +88,9 @@ const SYNTH_TOOL = 'subagent_council';
         id: context.agent?.id,
         isChild: (context.agent?.session?.ownEvents?.() ?? []).some((event) => event.type === 'subagent/descriptor'),
         text: assembly.sections.map((section) => String(section.text)).join('\n'),
-        tools: assembly.tools.map((tool) => tool.name),
+        // 0.2.2 detaches tool declarations from the assembly waterfall; the
+        // admitted set is carried on the assembly context instead.
+        tools: context.toolSet ? [...context.toolSet.view(context.scope).keys()] : assembly.tools ? assembly.tools.map((tool) => tool.name) : (context.agent?.ctx?.tools?.schemas?.(context.scope) ?? []).map((tool) => tool.name),
       });
       return next();
     });
@@ -117,6 +119,9 @@ const SYNTH_TOOL = 'subagent_council';
         }
         // The root scope must see the stand-ins for the section's tools.get().
         const parent = (await c.agents.create({ sessionId: 'council-smoke-root-' + randomUUID(), meta: { cwd: process.cwd() } })).agent;
+      // 0.2.2 fixes the model selection before prompt assembly; give the
+      // fixture a route so the child inherits one through the parent header.
+      parent.options = { ...parent.options, provider: 'fixture', model: 'fixture-model' };
         await c.systemPrompt.assemble({ agent: parent, scope: parent });
         const parentAssembly = () => assemblies.filter((entry) => entry.id === parent.id).at(-1);
 
