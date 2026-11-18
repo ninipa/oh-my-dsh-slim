@@ -50,6 +50,18 @@ test('only own tool is patched; execute/schema/concurrency and route field ident
   for (const value of [{ ...options, mcps: [] }, { ...options, backgroundMode: 'one-shot' }, { ...options, enableRunInBackground: false }]) assert.equal(patchRoleTool(tool, value).output, tool.output);
 });
 
+test('0.2.2-rc.2 child-defaults route sentence survives the role description patch', () => {
+  const tool = {
+    name: options.toolName,
+    description: 'Native. Omit `provider`, `model`, and `reasoning_effort` to use child defaults, '
+      + 'falling back to compatible parent values. Changing the route can prevent provider-side reuse.',
+    parameters: { provider: {}, model: {} },
+  };
+  const patched = patchRoleTool(tool, options);
+  assert.match(patched.description, /Omit `provider`, `model`, and `reasoning_effort` to use child defaults/);
+  assert.match(patched.description, /Changing the route can prevent provider-side reuse/);
+});
+
 test('role section preserves native dynamic visibility and every unrelated section', () => {
   const section = { name: 'tool:' + options.toolName, order: 116.5, text: ctx => ctx.visible ? 'Native visible' : '' };
   const patched = patchRoleSection(section, options);

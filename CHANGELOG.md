@@ -4,6 +4,35 @@ All notable changes to oh-my-dsh-slim. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions match npm
 package releases where applicable.
 
+## [0.8.10] — DSH 0.2.2-rc.2–rc.4: children are named, not numbered
+
+0.8.9 verified the 0.2.2 core on rc.1 only. From 0.2.2-rc.2 the host changed the delegation
+contract again, in ways that are admitted by the 0.2.2 core allow-list but silently degrade two
+preset features.
+
+- **Delegation results carry an agent name.** The stock tool now returns
+  `{ kind: 'activation', name: 'agent-1' }` and renders `started subagent agent-1` where rc.1
+  returned a Session id. `early-close-context` could no longer register a child, so the
+  running-lane block and the "a report is not a settlement" reminder disappeared; `subagent_result`
+  called `readSurface(SessionId('agent-1'))` and failed. Both now read the parent's own
+  `subagent/catalog` event, which records the name and child id at creation and needs no
+  `sessionQuery` service; `subagents.resolveName()` stays as a fallback, and `subagent_result`
+  accepts either an id or a name. The UUID path is unchanged for earlier hosts.
+- **Activation spec flattened.** `startActivation` moved `parent`, `prompt`, and `maxDepth` from
+  `spec.request` to the top level. Production code never calls it; the four opt-in smokes did, so
+  `test/host-shape.cjs` now shapes the spec for the installed host line and all smokes run on both.
+- **Host base disables `interrupt_agent`.** 0.2.2-rc.2 adds `interrupt: false` to its own
+  `tool-subagent-control` row. This preset's persona and ledger contract around that tool, and the
+  package still defaults it on, so the row declares `interrupt: true` explicitly and
+  `scripts/audit-host-rows.mjs` records the reasoned divergence.
+- **Third stock route sentence.** The delegation description now says "Omit `provider`, `model`,
+  and `reasoning_effort` …"; the role wrapper recognizes it alongside the two earlier markers.
+- **Verified hosts** gain `0.2.2-rc.4`. rc.4's new surface (`mcp-manager`, Team mode, CUA, Office)
+  leaves the default composition unchanged; the per-agent MCP path still uses `dsh-mcp-client`.
+- Verification: T0 and the host-row audit on rc.4 and rc.1; 204 unit tests; all eight smokes
+  (seven named plus the symlink web smoke) on both lines. The live-MCP path on 0.2.2 remains
+  unexercised by the suite, as before.
+
 ## [0.8.9] — DSH 0.2.2-rc.1: tools leave the assembly waterfall
 
 [#13](https://github.com/ninipa/oh-my-dsh-slim/issues/13): after upgrading to DSH 0.2.2-rc.1 all

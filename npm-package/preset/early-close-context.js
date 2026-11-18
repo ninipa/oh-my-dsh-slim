@@ -36,6 +36,7 @@
 // live activity; listChildren alone exposes durable catalog identities only.
 
 import { hostImport } from './bridge.js';
+import { childIdForName } from './child-catalog.js';
 
 /**
  * The host's own message constructor, loaded from the installed DSH instead
@@ -157,15 +158,71 @@ export function renderRows(rows) {
     + '\nA subagent report is not its completion: only its finish notice settles it. Do not output a final conclusion while any of them is unsettled; with multiple subagents, state each one\'s status individually — never summarize them as "the subagent is done" collectively.';
 }
 
-/** Extract the first UUID from a delegation result text (childId). */
-export function childIdOf(result) {
+/** Durable Session id shape used by a delegation result before 0.2.2-rc.2. */
+const SESSION_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+
+/** 0.2.2-rc.2 renders `started subagent <agent-name>` instead of `<session-id>`. */
+const STARTED_SUBAGENT = /started subagent (\S+)/;
+
+/** Concatenate the text blocks a tool result rendered. */
+function resultText(result) {
   if (typeof result !== 'object' || result === null || !Array.isArray(result.content)) return void 0;
-  const text = result.content
+  return result.content
     .filter((block) => block?.type === 'text' && typeof block.text === 'string')
     .map((block) => block.text)
     .join('');
-  const match = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
-  return match?.[0];
+}
+
+/** Extract the first UUID from a delegation result text (childId). */
+export function childIdOf(result) {
+  return resultText(result)?.match(SESSION_ID)?.[0];
+}
+
+/**
+ * Identify the child a delegation result named.
+ *
+ * 0.2.2-rc.2 flattened the activation spec and replaced the result's Session
+ * id with the model-facing agent name. Both shapes stay supported: the id is
+ * used directly, the name is resolved through the host's own tree lookup
+ * (`subagents.resolveName`, absent before 0.2.2-rc.2) in the async listener.
+ * @param result - the rendered tool result.
+ * @returns `{ kind: 'id' | 'name', value }`, or undefined when unparseable.
+ */
+export function childHandleOf(result) {
+  const text = resultText(result);
+  if (text === void 0) return void 0;
+  const id = text.match(SESSION_ID)?.[0];
+  if (id !== void 0) return { kind: 'id', value: id };
+  const started = text.match(STARTED_SUBAGENT);
+  return started === null ? void 0 : { kind: 'name', value: started[1] };
+}
+
+/**
+ * Map a model-facing child name to its durable Session id.
+ *
+ * The parent's own `subagent/catalog` event records the name and child id at
+ * creation, so the common path needs no service. `subagents.resolveName` is a
+ * fallback for a catalog that is not readable here; it needs `sessionQuery`
+ * and is absent before 0.2.2-rc.2. Best-effort by design: an unresolvable name
+ * leaves the delegation untracked, exactly as an unparseable result did
+ * before. Resolution grants no authority; the ledger only renders facts about
+ * the caller's own children.
+ * @param ctx - plugin context carrying the injected subagents service.
+ * @param parent - the exact live parent that started the child.
+ * @param name - the agent name from the result text.
+ * @returns the Session id, or undefined when it cannot be resolved.
+ */
+async function resolveChildId(ctx, parent, name) {
+  const recorded = childIdForName(parent, name);
+  if (recorded !== void 0) return recorded;
+  const subagents = ctx.subagents ?? ctx.get?.('subagents');
+  if (parent === undefined || typeof subagents?.resolveName !== 'function') return void 0;
+  try {
+    const id = await subagents.resolveName(parent, name, new AbortController().signal);
+    return typeof id === 'string' && id.length > 0 ? id : void 0;
+  } catch {
+    return void 0;
+  }
 }
 
 /** Non-delegation tools whose names collide with the subagent_ prefix. */
@@ -309,8 +366,12 @@ export function apply(ctx, config) {
     const info = pending.get(exec);
     pending.delete(exec);
     if (info === void 0 || result.isError) return next();
-    const childId = childIdOf(result);
-    if (childId === void 0 || info.parentId === void 0) return next();
+    const handle = childHandleOf(result);
+    if (handle === void 0 || info.parentId === void 0) return next();
+    // 0.2.2-rc.2+ names children; the async listener resolves the name to the
+    // Session id used by delivery events and the running-children block.
+    const childId = handle.kind === 'id' ? handle.value : await resolveChildId(ctx, exec.agent, handle.value);
+    if (childId === void 0) return next();
     const parentId = info.parentId;
     trackedParents.add(parentId);
     if (!isSettled(parentId, childId)) {

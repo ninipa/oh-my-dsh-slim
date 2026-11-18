@@ -19,10 +19,12 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const { randomUUID } = require('node:crypto');
+const { hostShapes } = require('./host-shape.cjs');
 
 const anchor = process.env.DSH_HOST_ANCHOR;
 if (!anchor || !path.isAbsolute(anchor)) throw new Error('Set DSH_HOST_ANCHOR to an absolute installed DSH host JS entry');
 const requireHost = createRequire(anchor);
+const { activationSpec } = hostShapes(requireHost);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'omds-model-switch-'));
 process.env.DSH_HOME = temporary;
 delete process.env.DSH_PROFILE;
@@ -126,7 +128,7 @@ const log = (...args) => console.log('[model-switch-smoke]', ...args);
             });
             try {
               await (typeof c.subagents.startActivation === 'function'
-                ? c.subagents.startActivation({ provider: 'spawn', label: 'oracle · smoke', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal, delivery: 'parent' })
+                ? c.subagents.startActivation(activationSpec({ provider: 'spawn', label: 'oracle · smoke', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal, delivery: 'parent' }))
                 : c.subagents.startContinuable({ provider: 'spawn', label: 'oracle · smoke', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal }));
             } catch (error) {
               if (!String(error?.message ?? error).includes('MODEL_SWITCH_STOP')) throw error;

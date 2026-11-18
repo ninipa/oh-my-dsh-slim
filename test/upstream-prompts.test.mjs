@@ -29,9 +29,9 @@ test('preset metadata exactly matches the upstream preset declaration', () => {
 test('native model-facing tool composition matches upstream without optional new tools', () => {
   const isNative = entry => entry.name.startsWith('@deepseek-ai/');
   // Persona is asserted separately (only its platform-shell suffix is added).
-  // tool-web is asserted separately too: its fetch value deliberately differs
-  // from the upstream text, see the assertion below.
-  const separatelyAsserted = new Set(['persona', 'tool-web']);
+  // tool-web and tool-subagent-control are asserted separately too: their
+  // configs deliberately differ from the upstream text, see below.
+  const separatelyAsserted = new Set(['persona', 'tool-web', 'tool-subagent-control']);
   const normalized = rows => flatten(rows).filter(isNative).map(entry => ({
     id: entry.id, name: entry.name,
     ...(entry.disabled === undefined ? {} : { disabled: entry.disabled }),
@@ -45,6 +45,10 @@ test('native model-facing tool composition matches upstream without optional new
   // disables web_fetch outright in web mode. Keep the effective 0.5.3 behavior,
   // not the dead declaration.
   assert.deepEqual(row('tool-web').config, { fetch: true, searchTimeoutMs: 60000 });
+  // Deliberate divergence from the stock composition: 0.2.2-rc.2 turns the
+  // host base's own control row to interrupt:false, while this preset's
+  // persona and early-close ledger contract around interrupt_agent.
+  assert.deepEqual(row('tool-subagent-control').config, { interrupt: true });
   for (const id of ['skill-filesystem', 'tool-skill', 'command-goal', 'present', 'tool-plugin-manager', 'tool-subagent-fork']) {
     assert.equal(row(id), undefined, 'not an upstream tool: ' + id);
   }

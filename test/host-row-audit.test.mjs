@@ -8,7 +8,7 @@ import { auditHostRows } from '../scripts/audit-host-rows.mjs';
 // A controlled reference host: the audit is the guard that would have caught
 // 0.6.0-0.6.2 shipping tool-web fetch:false (see scripts/audit-host-rows.mjs),
 // so it needs a failing case of its own, not only a green run.
-function fixtureHost({ toolWebFetch = 'true', planSection = null } = {}) {
+function fixtureHost({ toolWebFetch = 'true', planSection = null, interrupt = undefined } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'omds-host-rows-'));
   const base = join(dir, '@deepseek-ai', 'dsh-base');
   const web = join(dir, '@deepseek-ai', 'dsh-web-app');
@@ -32,6 +32,12 @@ function fixtureHost({ toolWebFetch = 'true', planSection = null } = {}) {
     '    - id: tool-plugin-manager',
     "      name: '@deepseek-ai/dsh-plugin-manager/tools'",
     '      disabled: true',
+    ...interrupt === undefined ? [] : [
+      '    - id: tool-subagent-control',
+      "      name: '@deepseek-ai/dsh-tool-subagent-control'",
+      '      config:',
+      `        interrupt: ${interrupt}`,
+    ],
     ...['command-goal', 'skill-filesystem', 'tool-skill', 'tool-subagent', 'tool-subagent-fork', 'tool-workflow', 'workflow-ptc']
       .flatMap(id => [`    - id: ${id}`, `      name: '@deepseek-ai/${id}'`]),
   ].join('\n');
@@ -68,6 +74,20 @@ test('host-row audit fails when the host stops shipping the inherited plan-mode 
   const result = auditHostRows({ referenceDir: dir });
   assert.equal(result.failures.length, 1);
   assert.match(result.failures[0], /plan-mode: parsePlanSection\(\) no longer reproduces the host base value/);
+});
+
+test('host-row audit accepts the preset interrupt:true divergence only while the host declares it off', (t) => {
+  const off = fixtureHost({ interrupt: 'false' });
+  t.after(() => rmSync(off, { recursive: true, force: true }));
+  const accepted = auditHostRows({ referenceDir: off });
+  assert.deepEqual(accepted.failures, []);
+  assert.ok(accepted.notes.some(note => note.includes('tool-subagent-control (listed divergence)')));
+
+  const on = fixtureHost({ interrupt: 'true' });
+  t.after(() => rmSync(on, { recursive: true, force: true }));
+  const stale = auditHostRows({ referenceDir: on });
+  assert.equal(stale.failures.length, 1);
+  assert.match(stale.failures[0], /tool-subagent-control: listed in DIVERGENCES but there is no live divergence/);
 });
 
 test('host-row audit skips loudly without a reference host', () => {

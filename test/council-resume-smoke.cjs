@@ -13,10 +13,12 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const { randomUUID } = require('node:crypto');
+const { hostShapes } = require('./host-shape.cjs');
 
 const anchor = process.env.DSH_HOST_ANCHOR;
 if (!anchor || !path.isAbsolute(anchor)) throw new Error('Set DSH_HOST_ANCHOR to an absolute installed DSH host JS entry');
 const requireHost = createRequire(anchor);
+const { activationSpec } = hostShapes(requireHost);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'omds-council-resume-'));
 // The preset resolves bare `@deepseek-ai/*` imports through the host loader
 // against this profile's base URL. A bare temp profile has no node_modules, so
@@ -91,7 +93,7 @@ fs.writeFileSync(CONFIG_PATH, JSON.stringify({ roles: { 'councillor-alpha': { en
       // fixture a route so the child inherits one through the parent header.
       parent.options = { ...parent.options, provider: 'fixture', model: 'fixture-model' };
           const receipt = await (typeof c.subagents.startActivation === 'function'
-            ? c.subagents.startActivation({ provider: 'spawn', label: 'councillor-alpha · resume', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal, delivery: 'parent' })
+            ? c.subagents.startActivation(activationSpec({ provider: 'spawn', label: 'councillor-alpha · resume', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal, delivery: 'parent' }))
             : c.subagents.startContinuable({ provider: 'spawn', label: 'councillor-alpha · resume', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal }));
           childId = receipt.childId;
           assert.ok(childId, 'the child started');

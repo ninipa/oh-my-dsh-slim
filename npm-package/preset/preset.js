@@ -565,7 +565,12 @@ export const plugins = [
     group: true,
     isolate: { workflowEngine: true },
     config: [
-      { id: 'tool-subagent-control', name: '@deepseek-ai/dsh-tool-subagent-control' },
+      // 0.2.2-rc.2 turned the host base's own row to interrupt:false. The
+      // orchestrator contract here (persona + early-close ledger) is written
+      // around interrupt_agent, and the package still defaults the tool on, so
+      // the preset declares that intent instead of inheriting the stock
+      // default-off. audits/host-row-audit lists the divergence.
+      { id: 'tool-subagent-control', name: '@deepseek-ai/dsh-tool-subagent-control', config: { interrupt: true } },
       { id: 'tool-subagent-list-agents', name: '@deepseek-ai/dsh-tool-subagent-control/list-agents' },
       ...roleRows,
       // DSH 0.2.1 rejects persona/toolFilter in a role row's config, so the

@@ -29,11 +29,41 @@
 // do NOT copy the pattern for packages loaded late in boot.
 
 import { hostImport } from './bridge.js';
+import { childIdForName } from './child-catalog.js';
 
 const name = 'subagent-result';
 // `loader` is the host's module loader: the only component that can resolve
 // @deepseek-ai/dsh-* for a plugin that lives outside the DSH installation.
 const inject = ['tools', 'loader'];
+
+/** Durable Session id shape; anything else may be a model-facing agent name. */
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolve the handle a delegation returned to a durable Session id.
+ *
+ * 0.2.2-rc.2 returns the model-facing agent name (`agent-1`) where earlier
+ * lines returned the Session id, so the tool must accept both. `resolveName`
+ * is the host's own tree lookup and does not exist before 0.2.2-rc.2; there an
+ * id passes through unchanged, and an unknown single-token name is likewise
+ * returned as-is by the host so the session query reports it.
+ * @param ctx - plugin context, used to reach the host's subagents service.
+ * @param parent - the exact live calling agent that owns the child.
+ * @param handle - the id or name the model supplied.
+ * @param signal - cancellation forwarded to the catalog read.
+ * @returns the Session id to read.
+ */
+export async function resolveSubagentTarget(ctx, parent, handle, signal) {
+  if (typeof handle !== 'string' || handle.length === 0 || SESSION_ID.test(handle)) return handle;
+  // The parent's own subagent catalog records name -> child id at creation;
+  // that path needs no service. resolveName is the fallback and requires
+  // sessionQuery, which a profile may not mount.
+  const recorded = childIdForName(parent, handle);
+  if (recorded !== void 0) return recorded;
+  const subagents = ctx?.subagents ?? (typeof ctx?.get === 'function' ? ctx.get('subagents') : undefined);
+  if (parent === undefined || typeof subagents?.resolveName !== 'function') return handle;
+  return subagents.resolveName(parent, handle, signal);
+}
 
 export function latestOwnAssistant(snapshot) {
   // Upstream scans the complete surface, including inherited fork history.
@@ -72,7 +102,7 @@ async function apply(ctx) {
       subagent_id: {
         type: 'string',
         required: true,
-        description: 'The durable subagent id returned when you started the background subagent.',
+        description: 'The durable subagent id or agent name returned when you started the background subagent.',
       },
     },
     output: {
@@ -112,9 +142,12 @@ async function apply(ctx) {
       if (query === void 0) {
         throw new Error('subagent_result: ctx.sessionQuery is not mounted (load @deepseek-ai/dsh-session-query-sqlite)');
       }
+      // 0.2.2-rc.2 returns an agent name from the delegation tool; resolve it
+      // through the host's own tree lookup before reading the Session surface.
+      const target = await resolveSubagentTarget(ctx, parent, args.subagent_id, new AbortController().signal);
       let snapshot;
       try {
-        snapshot = await query.readSurface(SessionId(args.subagent_id));
+        snapshot = await query.readSurface(SessionId(target));
       } catch (error) {
         if (error?.code === 'SESSION_QUERY_SESSION_NOT_FOUND') {
           throw new Error(`subagent_result: no session "${args.subagent_id}" — check the id recorded when the subagent started`);
@@ -127,10 +160,10 @@ async function apply(ctx) {
         throw new Error(`subagent_result: session "${args.subagent_id}" is not a direct child of this session`);
       }
       const result = latestOwnAssistant(snapshot);
-      if (result) return { ...result, subagentId: args.subagent_id };
+      if (result) return { ...result, subagentId: target };
       return {
         kind: 'no-assistant-message',
-        subagentId: args.subagent_id,
+        subagentId: target,
         capturedThroughSeq: snapshot.capturedThroughSeq ?? 0,
       };
     },

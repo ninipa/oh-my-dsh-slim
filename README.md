@@ -1,6 +1,6 @@
 # oh-my-dsh-slim
 
-**oh-my-dsh-slim · 0.8.9 · DSH 0.2 compatibility line**
+**oh-my-dsh-slim · 0.8.10 · DSH 0.2 compatibility line**
 
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
@@ -8,7 +8,7 @@ an orchestrator plus five enabled specialist roles, delivered as a **declarative
 preset**. It mounts from the plugin bundle; it is not a standalone application or a preset
 directory to copy.
 
-> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested hosts: DSH 0.2.0-rc.2, 0.2.1-rc.2, 0.2.1-rc.3, 0.2.1-rc.5 and 0.2.2-rc.1.** The gate is
+> **Host range: `>=0.2.0-rc.2 <0.3.0-0`; tested hosts: DSH 0.2.0-rc.2, 0.2.1-rc.2, 0.2.1-rc.3, 0.2.1-rc.5, 0.2.2-rc.1 and 0.2.2-rc.4 (full zero-model matrix). DSH 0.2.2-rc.3 was additionally exercised on the official desktop with three live delegations.** The gate is
 > a per-core allowlist: 0.2.0, 0.2.1 and 0.2.2 prereleases, stable releases and later patches are admitted;
 > prereleases of a higher patch or minor core (for example `0.2.3-rc.1`) are refused until a release
 > admits them. Upgrade policy: retain compatibility within the 0.2 line while the required APIs
@@ -23,6 +23,15 @@ directory to copy.
 
 Persona text is adapted from oh-my-opencode-slim (MIT © 2025 alvinunreal), with attribution
 retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
+
+> **0.8.10 (2026-11-18): DSH 0.2.2-rc.2–rc.4 compatibility.** From 0.2.2-rc.2 the host names
+> children (`agent-1`) where earlier lines returned a session id, flattens the activation spec, and
+> genuinely disables `interrupt_agent` in its own base composition. The running-lane ledger now
+> resolves a name from the parent's `subagent/catalog` record (tree lookup as fallback),
+> `subagent_result` accepts either an id or a name,
+> the role wrapper preserves the new child-defaults sentence, and the preset declares
+> `interrupt:true` as a reasoned divergence (its orchestrator contract uses that tool). Verified
+> against 0.2.2-rc.4 and 0.2.2-rc.1: T0, 204 tests and all eight smokes on both lines.
 
 > **0.8.9 (2026-11-05): DSH 0.2.2-rc.1 compatibility.** The npm `next` host line resolves a step's
 > admitted tool set before prompt assembly and no longer exposes `tools` to the
@@ -164,7 +173,7 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
 The desktop App exclusively manages its `desktop` profile. Install/update/remove through its plugin manager, **not** `dsh plugin --profile desktop`. Enter this pinned package spec:
 
 ```text
-oh-my-dsh-slim@0.8.9
+oh-my-dsh-slim@0.8.10
 ```
 
 Install by exact version from the release notes rather than a moving tag, and never substitute a
@@ -174,7 +183,7 @@ source and release tags: [ninipa/oh-my-dsh-slim](https://github.com/ninipa/oh-my
 The CLI commands below apply only to non-desktop-managed profiles:
 
 ```bash
-dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.9
+dsh plugin --profile <profile> add oh-my-dsh-slim@0.8.10
 ```
 
 For a local checkout instead, install the repository root — its export map serves the same modules

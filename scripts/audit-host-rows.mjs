@@ -41,6 +41,14 @@ const DIVERGENCES = [
     // have nothing to diverge from.
     when: (hostRow, ownRow) => hostRow.config?.applyPatch !== undefined && ownRow.config?.applyPatch === undefined,
   },
+  {
+    id: 'tool-subagent-control',
+    reason: 'the host base disables interrupt_agent from 0.2.2-rc.2 with interrupt:false, and '
+      + 'earlier verified lines expose no interrupt key at all. The preset orchestrator contract '
+      + '(persona and the early-close ledger) explicitly uses interrupt_agent, and the package still '
+      + 'defaults it on, so the preset declares interrupt:true in every line — a deliberate '
+      + 'capability divergence from the stock default-off.',
+  },
 ];
 
 /**

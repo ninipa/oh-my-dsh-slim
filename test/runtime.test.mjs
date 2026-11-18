@@ -185,8 +185,10 @@ for (const scoped of [false, true]) test(`actual stock registration keeps role d
     assert.equal(foreground[0].request.parent, parent);
   }
   if (scoped) {
+    // 0.2.2-rc.2 replaced "Supply provider and model together." with the
+    // child-defaults sentence; both are the route contract this test guards.
     assert.match(tool.description, modelSelectionKey === 'modelSelection'
-      ? /Supply `provider` and `model` together/
+      ? /Supply `provider` and `model` together|Omit `provider`, `model`, and `reasoning_effort`/
       : /Child LLM selection/);
     // 0.2.2 registers the delegation tool once through ctx.effect and lets the
     // tool framework scope it per agent; the per-agent re-registration
@@ -252,14 +254,14 @@ test('actual Cordis inject retains scoped service receiver and disposes registra
   await provider.dispose();
 });
 
-function earlyCloseHarness(rows, events = []) {
+function earlyCloseHarness(rows, events = [], resolveName = undefined) {
   const handlers = new Map();
   let section;
   const ctx = {
     composition: 'test-composition',
     on: (name, callback) => handlers.set(name, callback),
     loader: { ctx: { baseUrl: 'file:///host/entry.js' }, internal: { import: async specifier => specifier === '@deepseek-ai/dsh-scope' ? ({ scopeOf: value => value?.composition, scopeChainOf: value => value === undefined ? [] : [value] }) : ({ createUserMessage: value => ({ role: 'user', ...value }) }) } },
-    subagents: { listDescendants: async id => { assert.equal(id, parentId); return rows; } },
+    subagents: { listDescendants: async id => { assert.equal(id, parentId); return rows; }, ...(resolveName === undefined ? {} : { resolveName }) },
     inject: (_, callback) => callback({ systemPrompt: { context: value => { section = value; } } }),
   };
   applyEarlyClose(ctx, {});
@@ -329,5 +331,43 @@ test('settlement preceding tool result cannot reopen ledger', async () => {
   await harness.handlers.get('tools/post-execute')(exec, { content: [{ type: 'text', text: childId }] }, async () => {});
   assert.equal(harness.render(), '');
   await tick();
+  assert.equal(harness.render(), '');
+});
+
+test('0.2.2-rc.2 name result resolves from the parent catalog without resolveName', async () => {
+  const events = [{ seq: 5, type: 'subagent/catalog', data: { version: 3, childId, name: 'agent-3', label: 'oracle · task' } }];
+  const harness = earlyCloseHarness([{ id: childId, kind: 'child', parentId, depth: 1, activity: 'running' }], events);
+  const exec = { name: 'subagent_explorer', agent: harness.agent, arguments: { description: 'Catalog search' } };
+  await harness.handlers.get('tools/pre-execute')(exec, async () => {});
+  const decision = await harness.handlers.get('tools/post-execute')(exec, { content: [{ type: 'text', text: 'started subagent agent-3' }] }, async () => {});
+  assert.equal(decision.additionalContexts[0].source.kind, 'oh-my-dsh-slim/early-close-context');
+  assert.match(harness.render(), /Catalog search/);
+});
+
+test('0.2.2-rc.2 name result falls back to the host tree lookup', async () => {
+  const calls = [];
+  const harness = earlyCloseHarness(
+    [{ id: childId, kind: 'child', parentId, depth: 1, activity: 'running' }], [],
+    async (caller, name, signal) => { calls.push({ caller, name, signal }); return childId; },
+  );
+  const exec = { name: 'subagent_explorer', agent: harness.agent, arguments: { description: 'Named search' } };
+  await harness.handlers.get('tools/pre-execute')(exec, async () => {});
+  const decision = await harness.handlers.get('tools/post-execute')(exec, { content: [{ type: 'text', text: 'started subagent agent-1' }] }, async () => {});
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].caller, harness.agent);
+  assert.equal(calls[0].name, 'agent-1');
+  assert.equal(decision.additionalContexts[0].source.kind, 'oh-my-dsh-slim/early-close-context');
+  assert.match(harness.render(), /Named search/);
+});
+
+test('unresolvable name leaves the delegation untracked without failing', async () => {
+  const harness = earlyCloseHarness(
+    [{ id: childId, kind: 'child', parentId, depth: 1, activity: 'running' }], [],
+    async () => { throw new Error('AGENT_NAME_NOT_FOUND'); },
+  );
+  const exec = { name: 'subagent_explorer', agent: harness.agent, arguments: { description: 'Lost search' } };
+  await harness.handlers.get('tools/pre-execute')(exec, async () => {});
+  const decision = await harness.handlers.get('tools/post-execute')(exec, { content: [{ type: 'text', text: 'started subagent agent-404' }] }, async () => 'unchanged');
+  assert.equal(decision, 'unchanged');
   assert.equal(harness.render(), '');
 });

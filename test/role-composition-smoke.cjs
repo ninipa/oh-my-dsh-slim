@@ -17,10 +17,12 @@ const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const { pathToFileURL } = require('node:url');
 const { randomUUID } = require('node:crypto');
+const { hostShapes } = require('./host-shape.cjs');
 
 const anchor = process.env.DSH_HOST_ANCHOR;
 if (!anchor || !path.isAbsolute(anchor)) throw new Error('Set DSH_HOST_ANCHOR to an absolute installed DSH host JS entry');
 const requireHost = createRequire(anchor);
+const { activationSpec } = hostShapes(requireHost);
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'omds-role-composition-'));
 // The preset resolves bare `@deepseek-ai/*` imports through the host loader
 // against this profile's base URL. A bare temp profile has no node_modules, so
@@ -100,10 +102,19 @@ const log = (...args) => console.log('[role-smoke]', ...args);
       parent.options = { ...parent.options, provider: 'fixture', model: 'fixture-model' };
       await c.systemPrompt.assemble({ agent: parent, scope: parent });
       const receipt = await (typeof c.subagents.startActivation === 'function'
-        ? c.subagents.startActivation({ provider: 'spawn', label: 'oracle · smoke', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal, delivery: 'parent' })
+        ? c.subagents.startActivation(activationSpec({ provider: 'spawn', label: 'oracle · smoke', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal, delivery: 'parent' }))
         : c.subagents.startContinuable({ provider: 'spawn', label: 'oracle · smoke', request: { prompt: [{ type: 'text', text: 'smoke' }], parent, maxDepth: 1 }, signal: new AbortController().signal }));
       const childId = receipt.childId;
       assert.ok(childId, 'host started a child');
+      // 0.2.2-rc.2+ names children and records name -> child id in the parent's
+      // catalog; the preset's running-lane ledger and subagent_result read that
+      // entry (it needs no sessionQuery). rc.1 keeps the id-shaped result.
+      if (typeof receipt.name === 'string') {
+        const catalog = parent.session.ownEvents().filter(event => event.type === 'subagent/catalog');
+        const entry = catalog.at(-1);
+        assert.equal(entry?.data?.name, receipt.name, 'the parent catalog records the model-facing name');
+        assert.equal(entry?.data?.childId, childId, 'the parent catalog maps the name back to the child id');
+      }
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       const child = created.get(childId);

@@ -76,10 +76,11 @@ check(rootManifest.engines?.dsh === engines, 'root engines.dsh matches the packa
 // pinned so a future edit cannot silently widen or narrow admission.
 check(JSON.stringify(ADMITTED_PRERELEASE_CORES) === '["0.2.0","0.2.1","0.2.2"]',
   `prerelease cores are explicit (${JSON.stringify(ADMITTED_PRERELEASE_CORES)})`);
-check(VERIFIED_HOST_VERSIONS.includes('0.2.2-rc.1') && VERIFIED_HOST_VERSIONS.includes('0.2.1-rc.2') && VERIFIED_HOST_VERSIONS.includes('0.2.0-rc.2'),
+check(VERIFIED_HOST_VERSIONS.includes('0.2.2-rc.4') && VERIFIED_HOST_VERSIONS.includes('0.2.2-rc.1')
+  && VERIFIED_HOST_VERSIONS.includes('0.2.1-rc.2') && VERIFIED_HOST_VERSIONS.includes('0.2.0-rc.2'),
   `verified hosts name both lines (${VERIFIED_HOST_VERSIONS.join(', ')})`);
 check(hostVerdict('0.2.1-rc.2').status === 'ok', 'gate admits the 0.2.1 line');
-check(hostVerdict('0.2.2-rc.1').status === 'ok', 'gate admits the verified 0.2.2 prerelease');
+check(hostVerdict('0.2.2-rc.4').status === 'ok', 'gate admits the verified 0.2.2 prerelease');
 check(hostVerdict('0.2.3-rc.1').status === 'unsupported', 'gate still refuses an unverified new prerelease core');
 
 // --------------------------------------------------- published file surface
